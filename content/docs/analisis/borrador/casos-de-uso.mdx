@@ -1,0 +1,63 @@
+---
+title: 6. Casos de Uso
+description: Casos de Uso Principales de GEMA organizados por módulo
+---
+
+# 6. Casos de Uso Principales
+
+A continuación se describen los casos de uso del sistema organizados por módulo. Los roles involucrados son: Administrador, Supervisor, Técnico y Gerente. La lógica de permisos se aplica mediante el módulo RBAC descrito en el modelo de datos.
+
+---
+
+## 6.1. Gestión de Usuarios y Accesos
+
+| ID | Actor | Descripción | Resultado esperado |
+| :---: | :--- | :--- | :--- |
+| **CU-01** | Administrador | Registra un nuevo usuario en el sistema asignando nombre, email, contraseña temporal y rol. | Usuario creado y correo de bienvenida enviado con instrucciones de primer acceso. |
+| **CU-02** | Cualquier usuario | Inicia sesión con email y contraseña. El sistema valida las credenciales y emite un token JWT. | Acceso concedido y redireccionado al dashboard según su rol. |
+| **CU-03** | Administrador | Suspende o reactiva la cuenta de un usuario sin eliminar su historial de actividad. | El usuario suspendido no puede iniciar sesión. Su historial permanece íntegro. |
+
+---
+
+## 6.2. Gestión de Activos
+
+| ID | Actor | Descripción | Resultado esperado |
+| :---: | :--- | :--- | :--- |
+| **CU-04** | Administrador | Registra la empresa cliente con nombre, RIF, dirección y datos de contacto. | La empresa queda configurada como contexto base del sistema. |
+| **CU-05** | Supervisor / Admin | Registra un nuevo activo industrial indicando categoría, marca, modelo, serial, ubicación y valor. | El activo queda registrado con estado 'operativo' y visible en el inventario de activos. |
+| **CU-06** | Supervisor / Admin | Actualiza el estado de un activo (operativo, mantenimiento, fuera de servicio, baja). | El cambio queda registrado en el historial de estados con fecha, usuario y motivo. |
+| **CU-07** | Gerente / Supervisor | Consulta el listado de activos filtrando por estado, ubicación o categoría. | Se muestra la lista con estado actual y fecha del último cambio. |
+
+---
+
+## 6.3. Reportes de Falla y Órdenes de Trabajo
+
+| ID | Actor | Descripción | Resultado esperado |
+| :---: | :--- | :--- | :--- |
+| **CU-08** | Técnico / Supervisor | Reporta una falla en un activo describiendo el problema y asignando nivel de prioridad. | El reporte queda registrado y disponible para generar una orden de trabajo. |
+| **CU-09** | Supervisor | Crea una orden de trabajo correctiva a partir de un reporte de falla, asigna técnicos y establece descripción del trabajo. | La OT queda abierta y los técnicos asignados reciben notificación. |
+| **CU-10** | Técnico | Registra una sesión de intervención en una OT: fecha, horas trabajadas, tareas realizadas y repuestos utilizados. | La intervención queda registrada y el stock de repuestos se actualiza automáticamente. |
+| **CU-11** | Técnico | Cierra una orden de trabajo indicando que las tareas han sido completadas. | La OT pasa a estado 'completada' y queda pendiente de validación por el supervisor. |
+| **CU-12** | Supervisor | Valida y aprueba una orden de trabajo cerrada por el técnico. | La OT queda validada, el activo regresa al estado 'operativo' y se actualiza el log. |
+| **CU-13** | Supervisor | Crea una orden de trabajo preventiva vinculada a un plan de mantenimiento programado. | La OT preventiva queda abierta y el plan actualiza su próxima fecha de ejecución. |
+
+---
+
+## 6.4. Control de Inventario
+
+| ID | Actor | Descripción | Resultado esperado |
+| :---: | :--- | :--- | :--- |
+| **CU-14** | Supervisor / Admin | Registra la entrada de repuestos al inventario indicando proveedor, cantidad, precio y número de factura. | El stock del repuesto se incrementa y la entrada queda trazada con todos sus datos. |
+| **CU-15** | Cualquier usuario autenticado | Consulta el stock actual de un repuesto y su historial de movimientos. | Se muestra el stock actual, stock crítico y los últimos movimientos de entrada y salida. |
+| **CU-16** | Sistema automático | Detecta que el stock de un repuesto ha caído por debajo del stock crítico configurado. | Se genera una alerta visible en el dashboard del supervisor y del administrador. |
+
+---
+
+## 6.5. Inteligencia de Negocio
+
+| ID | Actor | Descripción | Resultado esperado |
+| :---: | :--- | :--- | :--- |
+| **CU-17** | Gerente / Supervisor | Accede al dashboard gerencial con los KPIs del período seleccionado. | Visualiza MTBF, MTTR, número de OTs por estado, activos críticos y costo total de mantenimiento. |
+| **CU-18** | Gerente | Valida una orden de trabajo de alto costo o impacto estratégico. | La OT queda marcada como validada por gerencia y el evento queda en auditoría. |
+
+<br />

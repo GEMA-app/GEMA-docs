@@ -1,0 +1,39 @@
+---
+title: 3. Requerimientos del Sistema
+description: Requerimientos Funcionales (RF) y No Funcionales (RNF) de GEMA
+---
+
+# 3. Requerimientos del Sistema
+
+---
+
+## 3.1. Requerimientos Funcionales
+
+Los requerimientos funcionales definen qué debe hacer el sistema. Están organizados por módulo y corresponden directamente a los procesos identificados en el Diagrama de Flujo de Datos Nivel 1.
+
+| ID | Módulo | Descripción |
+| :---: | :--- | :--- |
+| **RF-01** | **Gestión de Activos** | Control completo del ciclo de vida de los activos: registro, ubicación jerárquica, cambio de estado y baja. Historial de estados para cálculo de MTBF. |
+| **RF-02** | **Planificación de Mantenimiento** | Automatización de calendarios preventivos con frecuencia configurable. Generación de alertas automáticas cuando se aproxima la fecha de ejecución. |
+| **RF-03** | **Órdenes de Trabajo (OT)** | Trazabilidad completa del flujo: apertura, asignación de técnicos, registro de intervenciones, consumo de repuestos, cierre y validación gerencial. |
+| **RF-04** | **Reportes de Falla** | Registro de incidencias por activo con nivel de prioridad. Vinculación directa con la orden de trabajo correctiva generada. |
+| **RF-05** | **Control de Inventario** | Gestión de repuestos con entradas trazadas por proveedor y factura. Alertas automáticas cuando el stock cae por debajo del nivel crítico. |
+| **RF-06** | **Inteligencia de Negocio** | Dashboard gerencial con KPIs operativos: MTBF, MTTR, costo total de mantenimiento, OTs por estado y activos en condición crítica. |
+| **RF-07** | **Seguridad y Accesos (RBAC)** | Gestión de permisos por roles: Administrador, Supervisor, Técnico y Gerente. Cada rol accede únicamente a las funciones que le corresponden. |
+
+---
+
+## 3.2. Requerimientos No Funcionales
+
+Los requerimientos no funcionales definen los estándares de calidad que debe cumplir el sistema independientemente de las funcionalidades específicas.
+
+| ID | Atributo | Descripción y estándar técnico |
+| :---: | :--- | :--- |
+| **RNF-01** | **Escalabilidad** | Arquitectura modular que permite incorporar nuevos módulos sin rediseño del core. El Droplet puede escalarse verticalmente sin cambios en el código. |
+| **RNF-02** | **Seguridad** | Autenticación mediante JWT con tiempo de expiración configurable. Cifrado de contraseñas con bcrypt. Base de datos no expuesta a la IP pública. |
+| **RNF-03** | **Portabilidad** | Contenedores Docker garantizan que el sistema corre de forma idéntica en laptop de desarrollo y en el servidor de producción. |
+| **RNF-04** | **Usabilidad** | Diseño centrado en el usuario operativo. El técnico debe poder registrar una intervención en menos de 3 pasos desde el dashboard principal. |
+| **RNF-05** | **Disponibilidad** | Monitoreo de uptime con alertas inmediatas ante caídas del servidor. Backups automáticos diarios de PostgreSQL con retención de 7 días. |
+| **RNF-06** | **Trazabilidad** | Toda acción crítica queda registrada en la tabla de auditoría con usuario, IP, fecha y detalle de la operación realizada. |
+
+<br />

@@ -1,0 +1,35 @@
+---
+title: 7. Criterios de Aceptación
+description: Criterios de Aceptación del Producto Mínimo Viable (MVP) de GEMA
+---
+
+# 7. Criterios de Aceptación del MVP
+
+El Producto Mínimo Viable se considera entregable cuando los siguientes criterios estén verificados en el entorno de producción (servidor DigitalOcean). Los criterios marcados como **Obligatorio** son bloqueantes: ninguno puede estar pendiente en la fecha de entrega. Los marcados como **Recomendado** representan valor adicional y se incluirán si el tiempo lo permite.
+
+---
+
+## 7.1. Tabla de Criterios
+
+| # | Módulo | Criterio de aceptación | Prioridad |
+| :---: | :--- | :--- | :---: |
+| **1** | **Registro de empresa** | El sistema permite crear una empresa con nombre, RIF y datos de contacto. El administrador puede editarla y consultarla. | <span className="bg-destructive/20 text-destructive border border-destructive/30 px-2 py-0.5 rounded text-xs font-bold">Obligatorio</span> |
+| **2** | **Gestión de activos** | Se pueden registrar activos con catálogo, ubicación jerárquica, serial y estado. El estado se actualiza en tiempo real y queda en el historial. | <span className="bg-destructive/20 text-destructive border border-destructive/30 px-2 py-0.5 rounded text-xs font-bold">Obligatorio</span> |
+| **3** | **Estado de activos** | El usuario visualiza el estado operativo de cada activo (operativo / mantenimiento / fuera de servicio / baja) con fecha del último cambio. | <span className="bg-destructive/20 text-destructive border border-destructive/30 px-2 py-0.5 rounded text-xs font-bold">Obligatorio</span> |
+| **4** | **Técnicos asociados** | El administrador puede registrar usuarios con rol técnico, asignarlos a órdenes de trabajo y ver su carga de trabajo actual. | <span className="bg-destructive/20 text-destructive border border-destructive/30 px-2 py-0.5 rounded text-xs font-bold">Obligatorio</span> |
+| **5** | **Dashboard con KPIs** | El panel gerencial muestra MTBF y MTTR calculados, número de OTs abiertas, activos críticos y stock bajo mínimo con datos actualizados. | <span className="bg-destructive/20 text-destructive border border-destructive/30 px-2 py-0.5 rounded text-xs font-bold">Obligatorio</span> |
+| **6** | **Autenticación y roles** | Los usuarios acceden con email y contraseña. Cada rol (admin, supervisor, técnico, gerente) ve únicamente las funciones que le corresponden. | <span className="bg-destructive/20 text-destructive border border-destructive/30 px-2 py-0.5 rounded text-xs font-bold">Obligatorio</span> |
+| **7** | **Órdenes de trabajo básicas**| Se pueden crear, asignar, ejecutar y cerrar OTs correctivas. El técnico registra la intervención y el supervisor la valida. | <span className="bg-destructive/20 text-destructive border border-destructive/30 px-2 py-0.5 rounded text-xs font-bold">Obligatorio</span> |
+| **8** | **Inventario de repuestos** | Se puede consultar el stock actual de repuestos y el sistema alerta cuando un ítem cae por debajo del stock crítico. | <span className="bg-secondary text-secondary-foreground border px-2 py-0.5 rounded text-xs font-semibold">Recomendado</span> |
+| **9** | **Planes preventivos** | El sistema genera alertas de mantenimiento preventivo basadas en el intervalo de días configurado en cada plan. | <span className="bg-secondary text-secondary-foreground border px-2 py-0.5 rounded text-xs font-semibold">Recomendado</span> |
+| **10**| **Auditoría básica** | Toda acción crítica (crear OT, cambiar estado de activo, cerrar sesión) queda registrada con usuario, fecha e IP. | <span className="bg-secondary text-secondary-foreground border px-2 py-0.5 rounded text-xs font-semibold">Recomendado</span> |
+
+---
+
+## 7.2. Proceso de Verificación (QA)
+
+> [!NOTE]
+> **Equipo de Calidad (QA)**  
+> La verificación de cada criterio será realizada por el equipo de QA (**González Angel** y **Mundarain Adrián**) en el entorno de producción, no en local. Un criterio se considera aprobado cuando el escenario principal funciona sin errores y el escenario alternativo más probable está manejado con un mensaje de error adecuado.
+
+<br />

@@ -1,0 +1,73 @@
+---
+title: 4. Alcance y Cronograma
+description: Alcance del Proyecto (MVP), Exclusiones, Criterios de Éxito y Cronograma de 6 Semanas
+---
+
+# 4. Alcance del Proyecto
+
+El alcance del MVP está definido por lo que puede ser desarrollado, probado y desplegado en el período de 6 semanas establecido. La delimitación clara entre lo que está dentro y fuera del alcance es fundamental para mantener el foco del equipo y gestionar las expectativas del cliente.
+
+---
+
+## 4.1. Entregables del MVP
+
+Los siguientes entregables conforman el Producto Mínimo Viable comprometido al final del período de desarrollo:
+
+| Entregable | Descripción |
+| :--- | :--- |
+| **Módulo Core (Gestión de Activos)** | Sistema operativo para la gestión integral del ciclo de vida de activos industriales, incluyendo historial de estados y ubicaciones jerárquicas. |
+| **Módulo de Órdenes de Trabajo** | Flujo completo de mantenimiento correctivo y preventivo: desde el reporte de falla hasta el cierre técnico y validación gerencial. |
+| **Control de Inventario** | Gestión de repuestos con entradas trazadas, alertas de stock crítico y vinculación directa con las intervenciones técnicas. |
+| **Dashboard de KPIs** | Panel gerencial con MTBF, MTTR, costos de mantenimiento y estado de activos calculados en tiempo real sobre los datos operativos. |
+| **Integridad y Migración de Datos** | Scripts automatizados para normalización del modelo de datos previo (GIMA) y validación de la integridad del histórico en PostgreSQL. |
+| **Documentación Técnica** | Arquitectura del sistema, Modelo Entidad-Relación normalizado, Diagrama de Flujo de Datos Nivel 2 y manual de despliegue con Docker. |
+| **Manuales de Operación** | Guías de usuario por rol (administrador, supervisor, técnico, gerente) para facilitar la adopción tecnológica desde el primer día. |
+| **MVP Desplegado** | Solución funcional en servidor DigitalOcean accesible vía HTTPS, lista para demostración y uso operativo por el cliente potencial. |
+
+---
+
+## 4.2. Exclusiones del Alcance
+
+Las siguientes funcionalidades quedan explícitamente fuera del alcance de esta fase. Su exclusión es una decisión técnica y estratégica, no una omisión, y cada una tiene una justificación documentada:
+
+| Exclusión | Justificación |
+| :--- | :--- |
+| **Inteligencia Artificial predictiva** | Los modelos de IA requieren una base de datos histórica consolidada que solo existirá tras varios meses de operación. Se reserva para fases posteriores. |
+| **Gestión contable y nómina** | El enfoque del sistema es estrictamente operativo. La contabilidad profunda y el procesamiento de nómina corresponden a un ERP dedicado. |
+| **Aplicación móvil nativa** | El MVP prioriza la web responsive. Una app nativa para iOS/Android se considerará en fases de expansión según la demanda del cliente. |
+| **Integración con sistemas externos** | Conexiones con ERPs, sistemas SCADA o plataformas de terceros quedan fuera del alcance del MVP y se plantean como módulos de integración futura. |
+
+---
+
+## 4.3. Criterio de Éxito del Proyecto
+
+> [!IMPORTANT]
+> El proyecto se considera exitoso cuando el Ing. Oscar Cedeño pueda acceder al sistema desplegado en producción y realizar las siguientes acciones sin asistencia técnica:
+>
+> - Registrar su empresa y al menos cinco activos industriales con sus respectivas ubicaciones.
+> - Crear una orden de trabajo, asignar un técnico y registrar una intervención completa.
+> - Visualizar en el dashboard los KPIs de MTBF y MTTR calculados sobre los datos ingresados.
+> - Consultar el estado actual de sus activos y el historial de mantenimientos por equipo.
+
+---
+
+# 5. Cronograma del Proyecto (MVP)
+
+El Producto Mínimo Viable de GEMA se desarrollará en un período de 6 semanas, equivalente a 1 mes y 2 semanas. El equipo trabajará bajo metodología ágil con sprints semanales, revisiones de avance cada viernes y Pull Requests obligatorios hacia la rama develop para integrar el trabajo de los 20 desarrolladores de forma controlada.
+
+La planificación sigue un orden de dependencias técnicas: la infraestructura y el modelo de datos deben estar listos antes de que el frontend pueda maquetar, y el core de activos debe existir antes de que las órdenes de trabajo tengan sentido. El despliegue continuo en DigitalOcean estará operativo desde la semana 1, de modo que cada merge a main sea visible en el servidor del Ing. Oscar Cedeño en cuestión de minutos.
+
+| Semana | Fase | Actividades principales | Responsables |
+| :---: | :--- | :--- | :--- |
+| **1** | **Fundamentos** | Configuración repositorio, Docker Compose, rama develop, CI/CD básico, migración esquema PostgreSQL | DevOps, Backend |
+| **2** | **Core de activos** | CRUD empresa, activos, catálogo, ubicaciones, RBAC completo (login/JWT/roles) | Backend, Frontend |
+| **3** | **Órdenes de trabajo** | Módulo OTs: apertura, asignación de técnicos, sesiones de intervención, cierre y validación | Backend, Frontend, QA |
+| **4** | **Inventario y planes preventivos** | Gestión de repuestos, entradas de stock, proveedores, planes de mantenimiento preventivo y alertas | Backend, Frontend |
+| **5** | **KPIs y dashboard** | Cálculo MTBF / MTTR, panel gerencial con métricas en tiempo real, reportes exportables | Backend, Frontend, QA |
+| **6** (parcial) | **Estabilización y entrega MVP**| Pruebas de integración, corrección de bugs, despliegue final en DigitalOcean, manuales de usuario | Todo el equipo |
+
+> [!NOTE]
+> **Sincronización de Equipos**  
+> Las semanas 3 a 5 son las de mayor paralelismo entre Frontend y Backend. Los líderes de cada área son responsables de mantener sincronizado el contrato de la API (nombres de campos y endpoints) para evitar conflictos de integración.
+
+<br />
