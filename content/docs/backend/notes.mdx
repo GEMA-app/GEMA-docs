@@ -1,0 +1,356 @@
+---
+title: Notas
+description: Sección de Notas de GEMA
+---
+
+Conocer las bases del Framework FastAPI
+Crear APIs con FastAPI
+Usar FastAPI con SQLAlchemy
+Usar FastAPI con SQLModel
+Validaciones con Pydantic
+FastAPI Middlewares, Queryparams, seguridad con JWT
+Migraciones con Alembic
+PostgresDB
+Base de Datos Vectorial
+
+---
+
+## Contenido del curso
+
+- Instalaciones recomendadas
+- Instalar Python en Windows
+- Introducción a la sección
+- Temas puntuales de la sección
+- Variables
+- Tipos de datos
+- Condicionales
+- Operadores lógicos
+- Listas
+- Diccionarios
+- Tuplas
+- Sets
+- Ciclo For
+- Ciclo While
+- Funciones
+- Args y Kwargs
+- Funciones de orden superior (HOF)
+- Decoradores
+- Clases y objetos
+- Atributos y métodos
+- Classmethods y staticmethods
+- Programación Orientada a Objetos parte I
+- Programación Orientada a Objetos parte II
+- Programación Orientada a Objetos parte III
+- Manejo de errores
+- Módulos y paquetes
+- Librerías
+- Manejo de archivos
+- Código fuente de la sección
+
+- Introducción a la sección
+- Temas puntuales de la sección
+- ¿Qué es FastAPI y por qué aprenderlo?
+- Documentación y enlaces importantes
+- Instalar FastAPI
+- Nuestro primer endpoint (GET)
+- Get con datos
+- Query params
+- Path parameters
+- Ejercicio práctico - Query Params
+- Métodos HTTP y códigos de estatus
+- Método POST
+- Probando endpoints con CURL y POSTMAN
+- Método PUT y HttpException
+- Método DELETE
+- Documentación automática
+- Código fuente de la sección
+- Cuestionario sobre la sección
+
+- Introducción a la sección
+- Temas puntuales de la sección
+- ¿Qué es Pydantic y por qué lo usa FastAPI?
+- Creando modelos básicos con Pydantic
+- Probando modelos base creados
+- Validaciones automáticas con Pydantic
+- Campos opcionales y valores por defecto
+- Field y validaciones avanzadas
+- Validaciones personalizadas
+- Modelo de respuesta (parte 1)
+- Modelo de respuesta (parte 2)
+- Solución al ejercicio modelo de respuesta
+- Métodos anidados
+- Solución al ejercicio métodos anidados
+- Código fuente de la sección
+- Cuestionario - Sección 4
+
+- Introducción a la sección
+- Temas puntuales de la sección
+- Correcciones y mejoras de nuestro código
+- Repaso PathParams y QueryParams
+- Validaciones de Path parameters
+- Validaciones de Query parameters
+- Paginación y orden con QueryParams (parte 1)
+- Paginación y orden con QueryParams (parte 2)
+- Endpoint con metadatos
+- Ejercicio práctico - Endpoint con metadatos
+- Solución al ejercicio práctico (parte 1)
+- Solución al ejercicio práctico (parte 2)
+- Multiples valores en QueryParams con Listas
+- QueryParam deprecated
+- Código fuente de la sección
+- Cuestionario - Sección 5
+
+- Introducción a la sección
+- Temas puntuales de la sección
+- Bases de datos relacionales con FastAPI
+- Configurando proyecto para conectar base de datos
+- Modelo declarativo y conexión a la base de datos
+- Modelo Post
+- Crear un Post con base de datos
+- Crear un Post - Pruebas
+- Listar posts con base de datos
+- Listar posts - Pruebas
+- Obtener un post con base de datos
+- Ejercicio práctico - PUT y DELETE
+- Editar un Post con base de datos
+- Eliminar un Post con base de datos
+- Manejo de errores
+- Relación uno a muchos (author)
+- Relación muchos a muchos (tags)
+- Validación con ModelConfig
+- Crear un post con author y tags
+- Agregando datos a la tabla intermedia
+- Filtrar por tags
+- Instalar PostgreSQL
+- Conectar FastAPI con PostgreSQL
+- Código fuente de la sección
+- Cuestionario - Sección 6
+
+- Introducción a la sección
+- Temas puntuales de la sección
+- Estructura de archivos
+- Arquitectura de capas
+- Archivo para base de datos
+- Archivos para modelos
+- Archivo para validaciones (Schemas - DTO)
+- PostRepository - Obtener post por ID
+- PostRepository - Búsquedas (Search)
+- Ejercicio - PostRepository - Lista de tags
+- PostRepository - Ensure author y tags
+- PostRepository - Crear post
+- Ejercicio práctico - Post Repository put y delete
+- Router - Listar posts
+- Router - Tags y obtener por post ID
+- Router - Crear posts
+- Ejercicio práctico - Router - Actualizar y eliminar post
+- Montar router en main.py
+- Probando endpoints con arquitectura de capas
+- Código fuente de la sección
+- Cuestionario - Sección 7
+
+- Introducción a la sección
+- Temas puntuales de la sección
+- Dependencias
+- Introducción a la seguridad en APIs
+- Oauth2passwordBearer
+- Crear token JWT
+- Decodificar token JWT
+- Auth Schemas
+- Auth Router
+- Montar y probar Auth
+- Protegiendo rutas
+- Cambiando implementación de Author
+- Control de errores
+- Checkpoint del curso
+- Código fuente de la sección
+- Cuestionario - Sección 8
+
+- Introducción a la sección
+- Temas puntuales de la sección
+- Introducción al asíncronismo
+- Probando función síncrona y asíncrona
+- Errores comunes
+- Funciones asíncronas y síncronas en nuestro proyecto
+- Código fuente de la sección
+- Cuestionario - Sección 9
+
+- Introducción a la sección
+- Temas puntuales de la sección
+- Introducción al manejo de archivos
+- File (Bytes) y UploadFile
+- Guardar archivos en el disco local
+- Servir archivos estáticos
+- Agregar servicio para guardar archivo
+- Modificar modelo y schemas para guardar imagen
+- Modificar Router para aceptar archivos
+- Probando ruta para aceptar y guardar archivo
+- Limite de tamaño y chunks (parte 1)
+- Limite de tamaño y chunks (parte 2)
+- Código fuente de la sección
+- Cuestionario - Sección 10
+
+- Introducción a la sección
+- Temas puntuales de la sección
+- Configurar autoimports
+- Corregir creación de tags al crear un post
+- Tag Schemas
+- Endpoint crear tags
+- Listado de tags parte 1 (Inicios)
+- Listado de tags parte 2 (Servicio de paginación)
+- Listado de tags parte 3 (Repository)
+- Listado de tags parte 4 (Router)
+- Endpoint Update Delete (Repository)
+- Endpoint Update Delete (Router)
+- Endpoint Tag más popular
+- Código fuente de la sección
+- Cuestionario - Sección 11
+
+- Introducción a la sección
+- Temas puntuales de la sección
+- User model
+- User schemas
+- Security - Tokens
+- Security - Hash Password
+- Security - Require role
+- User Repository
+- User - Router - SetRole
+- User - Probando endpoints de registro y login
+- Token por formulario Swagger
+- Probando permisos por roles
+- Código fuente de la sección
+- Cuestionario - Sección 12
+
+- Introducción a la sección
+- Temas puntuales de la sección
+- Agregar modelo Category
+- Relación post con categorías
+- Corrección de post repository para crear base de datos
+- Category Schemas
+- Category Repository
+- Category Router
+- Agregando category router al main
+- Probando endpoints de categoría
+- Cambiando schemas, repository y router del post
+- Probando endpoints de post con categorías
+- Código fuente de la sección
+- Cuestionario - Sección 13
+
+- Introducción a la sección
+- Temas puntuales de la sección
+- Estructura de seeds y datos
+- Servicio de hash, validaciones y contextmanager
+- Seeds para usuarios
+- Seeds para categorías
+- Seeds para etiquetas
+- Archivo run seeds
+- Archivos de inicio y probando seeds
+- Agregando slug y utils para slugify
+- Modificando repository y router para agregar slug
+- Probando endpoint de post y agregar persistencia de autenticación
+- Código fuente de la sección
+- Cuestionario - Sección 14
+
+- Introducción a la sección
+- Temas puntuales de la sección
+- ¿Qué es un Middleware?
+- Creando Middleware
+- Middleware - Cálculo de tiempo de procesos
+- Middleware - Logging de peticiones
+- Middleware - Generando Request ID
+- Middleware - Bloqueador de IPs
+- Creando Frontend para probar CORS middleware
+- Middleware - CORS
+- Código fuente de la sección
+- Cuestionario - Sección 15
+
+- Introducción a la sección
+- Temas puntuales de la sección
+- SQLAlchemy vs SQLModel
+- Estructura del proyecto Devinote
+- Creando nuevo proyecto
+- Creando versionamiento (git)
+- Instalando paquetes necesarios
+- Instalando paquetes en diferentes entorno virtuales
+- Archivo de configuración y variables de entorno
+- Configuración para base de datos
+- Modelo - Usuario
+- Modelo - Notas
+- Modelo - Etiquetas
+- Modelo - Compartir
+- Repositorio - Usuario
+- Repositorio - Notas
+- Repositorio - Etiquetas
+- Repositorio - Compartir nota
+- Repositorio - Compartir etiqueta
+- Repositorio - Compartir notas - Complemento
+- Repositorio - Compartir - Lista de ids de notas y etiquetas
+- Repositorio - Etiquetas - Funciones de pertenencia
+- Repositorio - Notas - Complemento
+- Código fuente de la sección
+- Cuestionario - Sección 16
+
+- Introducción a la sección
+- Temas puntuales de la sección
+- Archivo de configuraciones
+- Servicio - Autenticación
+- Servicio - Notas - Permisos
+- Servicio - Notas - Lista de notas
+- Servicio - Notas - Crear nota
+- Servicio - Actualizar nota
+- Servicio - Borrar nota
+- Servicio - Etiquetas
+- Servicio - Compartir notas
+- Servicio - Compartir etiquetas
+- Dependencias de base de datos
+- Dependencias de usuario para rutas
+- Rutas - Autenticación
+- Rutas - Notas
+- Rutas - Etiquetas
+- Rutas - Compartir
+- Rutas - Compartir etiquetas
+- Configurando main.py
+- Corrigiendo errores
+- Comprobando creación de base de datos
+- Error con Scalars()
+- Swagger - Probando endpoints autenticación y etiquetas
+- Swagger - Probando endpoints notas
+- Swagger - Probando endpoints de compartir
+- Swagger - Probando endpoints de dejar de compartir
+- Código fuente de la sección
+- Cuestionario - Sección 17
+
+- Introducción a la sección
+- Temas puntuales de la sección
+- ¿Qué es Alembic?
+- Instalar e inicializar Alembic
+- Configurando Alembic
+- Cambios en el proyecto antes de migraciones
+- Aplicando migración con Alembic
+- Cambios futuros con Alembic
+- Código fuente de la sección
+- Cuestionario - Sección 18
+
+- Introducción a la sección
+- Temas puntuales de la sección
+- ¿Qué es Render?
+- Adaptando nuestro proyecto para deploy
+- Crear base de datos en Render
+- Crear web service en Render
+- Probando aplicación desplegada (parte 1)
+- Probando aplicación desplegada (parte 2)
+- Código fuente de la sección
+- Cuestionario - Sección 19
+
+- Despedida del curso
+
+- Introducción a la sección
+- Temas puntuales de la sección
+- ¿Qué es un Webhook?
+- Webhook - Creando DB y modelo
+- Webhook - Verificar firma
+- Webhook - Ruta para Github
+- Webhook - Función main
+- Crear tunel con ngrok
+- Configurando webhook para Github
+- Configurando webhook para Discord
+- Código fuente de la sección
