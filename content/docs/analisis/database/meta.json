@@ -1,0 +1,9 @@
+{
+  "title": "Base de Datos",
+  "description": "Documentación de Análisis del Modelo de Datos de GEMA",
+  "pages": [
+    "modelo-datos",
+    "mejoras-modelo-datos",
+    "modelo-datos-propuesta"
+  ]
+}

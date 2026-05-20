@@ -1,0 +1,355 @@
+---
+title: Modelo de datos
+description: Esquema de base de datos de GEMA — tablas, campos, enums y relaciones.
+---
+
+# Modelo de datos GEMA
+
+Este documento describe el esquema de base de datos de GEMA (Gestión Estratégica de Mantenimiento de Activos) en su versión 0. Sirve como referencia para entender qué tablas existen, qué guarda cada una y cómo se relacionan entre sí.
+
+> [!NOTE]
+> Existe una propuesta de evolución de este esquema (v0.1) con multimoneda, auditoría granular, KPIs y alertas. Consulta la [propuesta v0.1](/docs/analisis/database/propuesta-v0.1) para ver el esquema completo en revisión.
+
+---
+
+## Enums del sistema
+
+Los enums definen los valores permitidos para ciertos campos. El motor de base de datos rechaza cualquier valor que no esté en esta lista.
+
+| Enum | Valores |
+|---|---|
+| `estado_activo` | `operativo`, `mantenimiento`, `fuera_servicio`, `baja` |
+| `estado_ot` | `abierta`, `en_progreso`, `en_espera_repuesto`, `completada`, `cancelada` |
+| `tipo_mantenimiento` | `preventivo`, `correctivo`, `predictivo` |
+| `prioridad_nivel` | `critica`, `alta`, `media`, `baja` |
+| `frecuencia_tipo` | `diaria`, `semanal`, `quincenal`, `mensual`, `trimestral`, `semestral`, `anual` |
+
+---
+
+## Seguridad y accesos (RBAC)
+
+El sistema usa control de acceso basado en roles. Un usuario tiene uno o más roles, y cada rol agrupa permisos sobre módulos específicos.
+
+### usuarios
+
+Guarda la información de cada persona que accede al sistema.
+
+| Campo | Tipo | Restricciones | Descripción |
+|---|---|---|---|
+| `id` | integer | pk, autoincremental | Identificador único |
+| `nombre` | text | not null | Nombre completo |
+| `email` | text | unique, not null | Correo electrónico, usado para login |
+| `password_hash` | text | not null | Contraseña cifrada |
+| `telefono` | text | | Teléfono de contacto |
+| `activo` | boolean | default: true | Indica si la cuenta está habilitada |
+| `created_at` | timestamp | | Fecha de creación |
+| `updated_at` | timestamp | | Última actualización |
+
+### roles
+
+Define los perfiles de acceso disponibles en el sistema.
+
+| Campo | Tipo | Restricciones | Descripción |
+|---|---|---|---|
+| `id` | integer | pk, autoincremental | Identificador único |
+| `nombre` | varchar | unique, not null | Nombre del rol (ej: `admin`, `tecnico`) |
+| `descripcion` | text | | Descripción del rol |
+
+### permisos
+
+Cada permiso autoriza una acción sobre un módulo del sistema.
+
+| Campo | Tipo | Restricciones | Descripción |
+|---|---|---|---|
+| `id` | integer | pk, autoincremental | Identificador único |
+| `nombre` | varchar | unique, not null | Nombre del permiso (ej: `crear_ot`) |
+| `modulo` | varchar | not null | Módulo al que pertenece: `activos`, `ot`, `inventario`, `reportes`, `admin` |
+
+### usuario_roles
+
+Tabla intermedia que asigna roles a usuarios.
+
+| Campo | Tipo | Restricciones | Descripción |
+|---|---|---|---|
+| `usuario_id` | integer | pk, ref: usuarios.id | Usuario |
+| `role_id` | integer | pk, ref: roles.id | Rol asignado |
+
+### role_permisos
+
+Tabla intermedia que asigna permisos a roles.
+
+| Campo | Tipo | Restricciones | Descripción |
+|---|---|---|---|
+| `role_id` | integer | pk, ref: roles.id | Rol |
+| `permiso_id` | integer | pk, ref: permisos.id | Permiso asignado |
+
+---
+
+## Ubicaciones técnicas
+
+Las ubicaciones forman una jerarquía: sede → planta → área → sección. El campo `parent_id` apunta a la ubicación padre; si es `null`, la ubicación es un nodo raíz (una sede).
+
+### ubicaciones
+
+| Campo | Tipo | Restricciones | Descripción |
+|---|---|---|---|
+| `id` | integer | pk, autoincremental | Identificador único |
+| `parent_id` | integer | ref: ubicaciones.id, null | Ubicación padre (jerarquía) |
+| `nombre` | varchar | not null | Nombre de la ubicación |
+| `tipo` | varchar | not null | Tipo: `sede`, `planta`, `area`, `seccion` |
+| `descripcion` | text | | Descripción adicional |
+
+---
+
+## Catálogo de activos
+
+Antes de registrar un activo físico, el sistema necesita saber qué tipo de equipo es. El catálogo organiza los artículos por categoría y guarda sus especificaciones técnicas.
+
+### categorias_articulos
+
+Categorías jerárquicas para clasificar artículos (ej: Eléctricos → Motores → Trifásicos).
+
+| Campo | Tipo | Restricciones | Descripción |
+|---|---|---|---|
+| `id` | integer | pk, autoincremental | Identificador único |
+| `parent_id` | integer | ref: categorias_articulos.id, null | Categoría padre |
+| `nombre` | text | not null | Nombre de la categoría |
+| `descripcion` | text | | Descripción |
+
+### articulos_catalogo
+
+Define los modelos y marcas disponibles en el catálogo.
+
+| Campo | Tipo | Restricciones | Descripción |
+|---|---|---|---|
+| `id` | integer | pk, autoincremental | Identificador único |
+| `categoria_id` | integer | ref: categorias_articulos.id | Categoría del artículo |
+| `marca` | text | | Marca del fabricante |
+| `modelo` | text | | Modelo del equipo |
+| `especificaciones` | jsonb | | Datasheet flexible con especificaciones técnicas |
+
+---
+
+## Gestión de activos
+
+Aquí se registran los equipos físicos instalados en campo. Cada activo tiene un artículo de catálogo, una ubicación y un estado operativo.
+
+### activos
+
+| Campo | Tipo | Restricciones | Descripción |
+|---|---|---|---|
+| `id` | integer | pk, autoincremental | Identificador único |
+| `articulo_id` | integer | ref: articulos_catalogo.id | Tipo de artículo |
+| `ubicacion_id` | integer | ref: ubicaciones.id | Dónde está instalado |
+| `serial_interno` | varchar | unique, not null | Serial del fabricante o tag de campo |
+| `codigo_activo` | varchar | unique, not null | Código interno asignado por la empresa |
+| `estado` | estado_activo | default: operativo | Estado actual del activo |
+| `fecha_adquisicion` | date | | Fecha de compra |
+| `valor_monetario` | numeric(12,2) | | Valor de adquisición |
+| `moneda` | varchar(3) | default: USD | Divisa: `USD`, `VES`, `EUR` |
+| `created_at` | timestamp | | Fecha de registro |
+
+---
+
+## Planificación de mantenimiento preventivo
+
+Los planes definen qué mantenimiento necesita cada activo, con qué frecuencia y quién es el responsable.
+
+### planes_mantenimiento
+
+| Campo | Tipo | Restricciones | Descripción |
+|---|---|---|---|
+| `id` | integer | pk, autoincremental | Identificador único |
+| `activo_id` | integer | ref: activos.id | Activo al que aplica |
+| `tecnico_responsable_id` | integer | ref: usuarios.id | Técnico asignado |
+| `nombre` | varchar | not null | Nombre del plan |
+| `tipo` | tipo_mantenimiento | not null | Tipo: `preventivo`, `correctivo`, `predictivo` |
+| `frecuencia` | frecuencia_tipo | not null | Frecuencia programada |
+| `intervalo_dias` | integer | | Días entre ejecuciones |
+| `proxima_ejecucion` | date | not null | Fecha de la próxima revisión |
+| `descripcion_tareas` | text | | Detalle de las tareas a realizar |
+| `activo` | boolean | default: true | Si el plan está vigente |
+| `created_at` | timestamp | | Fecha de creación |
+
+---
+
+## Reportes y órdenes de trabajo
+
+El ciclo de trabajo arranca cuando alguien reporta una falla o cuando el sistema genera una orden desde un plan preventivo.
+
+### reportes_falla
+
+| Campo | Tipo | Restricciones | Descripción |
+|---|---|---|---|
+| `id` | integer | pk, autoincremental | Identificador único |
+| `usuario_reporta_id` | integer | ref: usuarios.id | Quién reporta la falla |
+| `activo_id` | integer | ref: activos.id | Activo afectado |
+| `descripcion_falla` | text | not null | Descripción del problema |
+| `prioridad` | prioridad_nivel | default: media | Nivel de urgencia |
+| `fecha_reporte` | timestamp | default: now() | Cuándo se reportó |
+| `atendido` | boolean | default: false | Si ya fue atendido |
+
+### ordenes_trabajo
+
+La orden de trabajo es el registro central del mantenimiento. Cada OT tiene un código único, un activo asociado, un tipo de mantenimiento y un ciclo de vida con timestamps para calcular MTTR.
+
+| Campo | Tipo | Restricciones | Descripción |
+|---|---|---|---|
+| `id` | integer | pk, autoincremental | Identificador único |
+| `codigo_ot` | varchar | unique, not null | Código legible (ej: `OT-2026-0001`) |
+| `activo_id` | integer | ref: activos.id | Activo intervenido |
+| `reporte_id` | integer | ref: reportes_falla.id, null | Origen si es correctivo |
+| `plan_id` | integer | ref: planes_mantenimiento.id, null | Origen si es preventivo |
+| `supervisor_id` | integer | ref: usuarios.id | Supervisor a cargo |
+| `tipo` | tipo_mantenimiento | not null | Tipo de mantenimiento |
+| `estado` | estado_ot | default: abierta | Estado actual de la orden |
+| `fecha_apertura` | timestamp | | Cuándo se abrió la OT |
+| `fecha_inicio_trabajo` | timestamp | | Cuándo arrancó el trabajo |
+| `fecha_cierre` | timestamp | | Cuándo se cerró la OT |
+| `descripcion_trabajo` | text | | Detalle del trabajo realizado |
+| `costo_estimado` | numeric(12,2) | | Costo presupuestado |
+| `costo_real` | numeric(12,2) | | Costo final ejecutado |
+| `moneda` | varchar(3) | default: USD | Divisa |
+| `validado_gerencia` | boolean | default: false | Si gerencia aprobó la OT |
+| `created_at` | timestamp | | Fecha de creación |
+
+### ot_tecnicos_asignados
+
+Asigna técnicos a una orden antes de iniciar el trabajo. Cada técnico debe confirmar su asignación.
+
+| Campo | Tipo | Restricciones | Descripción |
+|---|---|---|---|
+| `ot_id` | integer | pk, ref: ordenes_trabajo.id | Orden de trabajo |
+| `tecnico_id` | integer | pk, ref: usuarios.id | Técnico asignado |
+| `fecha_asignacion` | timestamp | default: now() | Cuándo se asignó |
+| `confirmado` | boolean | default: false | Si el técnico confirmó |
+
+### intervenciones_tecnicas
+
+Registra cada sesión de trabajo dentro de una orden. Una OT puede tener múltiples intervenciones.
+
+| Campo | Tipo | Restricciones | Descripción |
+|---|---|---|---|
+| `id` | integer | pk, autoincremental | Identificador único |
+| `ot_id` | integer | ref: ordenes_trabajo.id | Orden de trabajo |
+| `tecnico_id` | integer | ref: usuarios.id | Técnico que ejecutó |
+| `fecha_inicio` | timestamp | | Inicio de la intervención |
+| `fecha_fin` | timestamp | | Fin de la intervención |
+| `horas_hombre` | numeric(6,2) | | Tiempo dedicado (base para KPIs) |
+| `tareas_realizadas` | text | | Descripción del trabajo |
+
+---
+
+## Inventario y proveedores
+
+Control de repuestos, stock, proveedores y trazabilidad de cada entrada de almacén.
+
+### proveedores
+
+| Campo | Tipo | Restricciones | Descripción |
+|---|---|---|---|
+| `id` | integer | pk, autoincremental | Identificador único |
+| `nombre` | text | not null | Nombre del proveedor |
+| `rif` | varchar | unique | Registro de información fiscal |
+| `contacto` | text | | Persona de contacto |
+| `email` | text | | Correo electrónico |
+| `telefono` | text | | Teléfono |
+| `activo` | boolean | default: true | Si el proveedor está habilitado |
+
+### inventario_repuestos
+
+| Campo | Tipo | Restricciones | Descripción |
+|---|---|---|---|
+| `id` | integer | pk, autoincremental | Identificador único |
+| `proveedor_id` | integer | ref: proveedores.id, null | Proveedor principal |
+| `nombre` | text | not null | Nombre del repuesto |
+| `codigo_parte` | varchar | unique | Código del fabricante |
+| `stock_actual` | numeric(10,2) | default: 0 | Cantidad en almacén |
+| `stock_critico` | numeric(10,2) | not null | Umbral que dispara alerta de reposición |
+| `precio_unitario` | numeric(12,2) | | Precio de referencia |
+| `moneda` | varchar(3) | default: USD | Divisa |
+
+### entradas_inventario
+
+Cada entrada de stock queda registrada para trazabilidad completa. Esta tabla es inmutable en el sentido de que no se edita: cada nueva compra genera un nuevo registro.
+
+| Campo | Tipo | Restricciones | Descripción |
+|---|---|---|---|
+| `id` | integer | pk, autoincremental | Identificador único |
+| `repuesto_id` | integer | ref: inventario_repuestos.id | Repuesto que ingresa |
+| `proveedor_id` | integer | ref: proveedores.id | Proveedor de la compra |
+| `usuario_registra_id` | integer | ref: usuarios.id | Quién registró la entrada |
+| `cantidad` | numeric(10,2) | not null | Cantidad ingresada |
+| `precio_unitario` | numeric(12,2) | | Precio pagado por unidad |
+| `moneda` | varchar(3) | default: USD | Divisa |
+| `fecha_entrada` | timestamp | default: now() | Cuándo ingresó al almacén |
+| `nro_factura` | varchar | | Número de factura asociado |
+
+### repuestos_utilizados
+
+Vincula los repuestos consumidos con cada intervención técnica.
+
+| Campo | Tipo | Restricciones | Descripción |
+|---|---|---|---|
+| `id` | integer | pk, autoincremental | Identificador único |
+| `intervencion_id` | integer | ref: intervenciones_tecnicas.id | Intervención donde se usó |
+| `repuesto_id` | integer | ref: inventario_repuestos.id | Repuesto consumido |
+| `cantidad_usada` | numeric(10,2) | not null | Cantidad utilizada |
+
+---
+
+## BI y auditoría
+
+Tablas para rastrear cambios de estado y registrar acciones del sistema. La tabla `logs_estados_activos` es clave para calcular MTBF (tiempo medio entre fallos).
+
+### logs_estados_activos
+
+| Campo | Tipo | Restricciones | Descripción |
+|---|---|---|---|
+| `id` | integer | pk, autoincremental | Identificador único |
+| `activo_id` | integer | ref: activos.id | Activo que cambió |
+| `usuario_id` | integer | ref: usuarios.id | Quién hizo el cambio |
+| `estado_anterior` | estado_activo | | Estado antes del cambio |
+| `estado_nuevo` | estado_activo | | Estado después del cambio |
+| `motivo` | text | | Razón del cambio |
+| `fecha_cambio` | timestamp | default: now() | Cuándo ocurrió |
+
+### auditoria_sistema
+
+Registro general de acciones en el sistema: logins, creaciones, eliminaciones, etc.
+
+| Campo | Tipo | Restricciones | Descripción |
+|---|---|---|---|
+| `id` | integer | pk, autoincremental | Identificador único |
+| `usuario_id` | integer | ref: usuarios.id | Usuario que ejecutó la acción |
+| `accion` | varchar | not null | Tipo de acción (ej: `login`, `create_ot`) |
+| `detalles` | jsonb | | Datos adicionales en formato JSON |
+| `ip_address` | varchar | | Dirección IP del usuario |
+| `timestamp` | timestamp | default: now() | Cuándo ocurrió |
+
+---
+
+## Resumen de relaciones
+
+```
+usuarios ──< usuario_roles >── roles ──< role_permisos >── permisos
+
+ubicaciones ──< ubicaciones (self-ref, jerarquía)
+
+categorias_articulos ──< categorias_articulos (self-ref, jerarquía)
+categorias_articulos ──< articulos_catalogo ──< activos
+
+activos ──< planes_mantenimiento ──< ordenes_trabajo
+activos ──< reportes_falla ──< ordenes_trabajo
+activos ──< logs_estados_activos
+
+ordenes_trabajo ──< ot_tecnicos_asignados >── usuarios
+ordenes_trabajo ──< intervenciones_tecnicas >── usuarios
+intervenciones_tecnicas ──< repuestos_utilizados >── inventario_repuestos
+
+proveedores ──< inventario_repuestos ──< entradas_inventario
+proveedores ──< entradas_inventario
+```
+
+> [!TIP]
+> Si necesitas ver el esquema completo en formato DBML, consulta [gema-dbml-v0](/docs/analisis/database/gema-dbml-v0).

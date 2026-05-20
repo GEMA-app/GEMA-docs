@@ -1,0 +1,520 @@
+---
+title: Mejoras al modelo de datos
+description: Propuestas de evolución del esquema de GEMA — auditoría granular, multimoneda, KPIs y más.
+---
+
+# Mejoras al modelo de datos
+
+Este documento recoge las propuestas de mejora identificadas sobre el esquema actual de GEMA. Cada propuesta incluye el problema que resuelve, qué tablas afecta y un borrador del cambio en formato tabular.
+
+> [!NOTE]
+> Estas mejoras están consolidadas en la [propuesta v0.1](/docs/analisis/database/propuesta-v0.1), que presenta el esquema completo con todos los cambios aplicados.
+
+---
+
+## 1. Auditoría y trazabilidad
+
+El modelo actual tiene una sola tabla `auditoria_sistema` que registra acciones genéricas. Eso no nos dice qué valor tenía un campo antes de cambiar, ni por qué cambió el estado de un activo. La propuesta es separar la auditoría en tablas especializadas.
+
+**Qué cambia:**
+
+- `logs_estados_activos` ya existe pero se mantiene como está
+- Se agrega `logs_estados_ordenes_trabajo` para rastrear transiciones de OT
+- Se renombra `auditoria_sistema` a `auditorias_sistema` (cambio de nombre en plural)
+- Se crea `auditorias_cambios` para registrar cambios a nivel de campo en cualquier tabla
+
+**Qué tablas afecta:** `auditoria_sistema`, `logs_estados_activos`, `ordenes_trabajo`
+
+**Estado actual:**
+
+### auditoria_sistema
+
+| Campo | Tipo | Restricciones | Descripción |
+|---|---|---|---|
+| `id` | integer | pk, autoincremental | Identificador único |
+| `usuario_id` | integer | ref: usuarios.id | Usuario que ejecutó la acción |
+| `accion` | varchar | not null | Tipo de acción registrada |
+| `detalles` | jsonb | | Datos adicionales en formato JSON |
+| `ip_address` | varchar | | Dirección IP del usuario |
+| `timestamp` | timestamp | default: now() | Fecha y hora de la acción |
+
+<br />
+
+**Propuesta:**
+
+### logs_estados_activos
+
+| Campo | Tipo | Restricciones | Descripción |
+|---|---|---|---|
+| `id` | integer | pk, autoincremental | Identificador único |
+| `activo_id` | integer | ref: activos.id | Activo que cambió de estado |
+| `usuario_id` | integer | ref: usuarios.id | Quién realizó el cambio |
+| `estado_anterior` | estado_activo | | Estado antes del cambio |
+| `estado_nuevo` | estado_activo | not null | Estado después del cambio |
+| `motivo` | text | | Razón del cambio |
+| `fecha_cambio` | timestamp | default: now() | Cuándo ocurrió el cambio |
+
+<br />
+
+### logs_estados_ordenes_trabajo
+
+| Campo | Tipo | Restricciones | Descripción |
+|---|---|---|---|
+| `id` | integer | pk, autoincremental | Identificador único |
+| `ot_id` | integer | ref: ordenes_trabajo.id | Orden de trabajo afectada |
+| `usuario_id` | integer | ref: usuarios.id | Quién realizó el cambio |
+| `estado_anterior` | estado_orden_trabajo | | Estado antes del cambio |
+| `estado_nuevo` | estado_orden_trabajo | not null | Estado después del cambio |
+| `motivo` | text | | Razón del cambio |
+| `fecha_cambio` | timestamp | default: now() | Cuándo ocurrió el cambio |
+
+<br />
+
+### auditorias_sistema
+
+| Campo | Tipo | Restricciones | Descripción |
+|---|---|---|---|
+| `id` | integer | pk, autoincremental | Identificador único |
+| `usuario_id` | integer | ref: usuarios.id | Usuario que ejecutó la acción |
+| `accion` | varchar | not null | Tipo de acción (ej: login, create_ot) |
+| `detalles` | jsonb | | Datos adicionales en formato JSON |
+| `ip_address` | varchar | | Dirección IP del usuario |
+| `ocurrido_en` | timestamp | default: now() | Cuándo ocurrió |
+
+<br />
+
+### auditorias_cambios
+
+| Campo | Tipo | Restricciones | Descripción |
+|---|---|---|---|
+| `id` | integer | pk, autoincremental | Identificador único |
+| `usuario_id` | integer | ref: usuarios.id | Usuario que hizo el cambio |
+| `tabla_afectada` | varchar | not null | Tabla donde se modificó el dato |
+| `registro_id` | varchar | not null | ID del registro afectado |
+| `campo` | varchar | not null | Nombre del campo modificado |
+| `valor_anterior` | text | | Valor antes del cambio |
+| `valor_nuevo` | text | | Valor después del cambio |
+| `ocurrido_en` | timestamp | default: now() | Cuándo ocurrió |
+
+<br />
+
+---
+
+## 2. Multimoneda con histórico de tasas
+
+El esquema actual guarda un valor numérico y un código de divisa (`USD`, `VES`). Si la tasa de cambio varía, los reportes históricos pierden sentido porque no hay forma de reconstruir la conversión original.
+
+La solución es registrar el monto en la divisa original y su equivalente en la moneda base del sistema, junto con la tasa que se usó en ese momento.
+
+**Qué cambia:**
+
+- Se crea la tabla `tasas_cambio` para guardar tasas históricas
+- Cada campo monetario se duplica: `*_original` y `*_base`
+- Se agrega `tasa_cambio_id` como referencia a la tasa aplicada
+- Se agrega `updated_at` a las tablas que ganan campos nuevos
+
+**Qué tablas afecta:** `activos`, `ordenes_trabajo`, `inventario_repuestos`, `entradas_inventario`
+
+**Estado actual (ejemplo con `activos`):**
+
+### activos
+
+| Campo | Tipo | Restricciones | Descripción |
+|---|---|---|---|
+| `id` | integer | pk, autoincremental | Identificador único |
+| `articulo_id` | integer | ref: articulos_catalogo.id | Tipo de artículo |
+| `ubicacion_id` | integer | ref: ubicaciones.id | Dónde está instalado |
+| `serial_interno` | varchar | unique, not null | Serial del fabricante o tag de campo |
+| `codigo_activo` | varchar | unique, not null | Código interno asignado por la empresa |
+| `estado` | estado_activo | default: operativo | Estado actual del activo |
+| `fecha_adquisicion` | date | | Fecha de compra |
+| `valor_monetario` | numeric(12,2) | | Valor en la divisa |
+| `moneda` | varchar(3) | default: USD | Divisa |
+| `created_at` | timestamp | | Fecha de creación |
+
+<br />
+
+**Propuesta:**
+
+### tasas_cambio
+
+| Campo | Tipo | Restricciones | Descripción |
+|---|---|---|---|
+| `id` | integer | pk, autoincremental | Identificador único |
+| `moneda_origen` | varchar(3) | not null | Divisa de origen (ej: USD) |
+| `moneda_destino` | varchar(3) | not null | Divisa de destino (ej: VES) |
+| `tasa` | numeric(12,4) | not null | Tasa de conversión |
+| `fecha` | date | not null | Fecha de la tasa |
+| `created_at` | timestamp | default: now() | Fecha de registro |
+
+<br />
+
+### activos
+
+| Campo | Tipo | Restricciones | Descripción |
+|---|---|---|---|
+| `id` | integer | pk, autoincremental | Identificador único |
+| `articulo_id` | integer | ref: articulos_catalogo.id | Tipo de artículo |
+| `ubicacion_id` | integer | ref: ubicaciones.id | Dónde está instalado |
+| `serial_interno` | varchar | unique, not null | Serial del fabricante o tag de campo |
+| `codigo_activo` | varchar | unique, not null | Código interno asignado por la empresa |
+| `estado` | estado_activo | default: operativo | Estado actual del activo |
+| `fecha_adquisicion` | date | | Fecha de compra |
+| `valor_monetario_original` | numeric(12,2) | | Valor en la divisa de compra |
+| `valor_monetario_base` | numeric(12,2) | | Equivalente en moneda base del sistema |
+| `moneda_original` | varchar(3) | null | Divisa original |
+| `tasa_cambio_id` | integer | ref: tasas_cambio.id, null | Tasa aplicada en la conversión |
+| `created_at` | timestamp | default: now() | Fecha de creación |
+| `updated_at` | timestamp | default: now() | Última actualización |
+
+<br />
+
+---
+
+## 3. Eliminación de redundancia en planes preventivos
+
+El diseño actual tiene dos campos que dicen lo mismo: `frecuencia` (un enum como `mensual`) e `intervalo_dias` (un número). Si un plan dice "mensual" pero el intervalo marca 45 días, el backend no sabe a cuál hacerle caso.
+
+La propuesta es eliminar el enum `frecuencia_tipo` y dejar `intervalo_dias` como única fuente de verdad. La interfaz puede derivar la etiqueta visual ("mensual", "semanal") del número, no al revés.
+
+**Qué cambia:**
+
+- Se elimina el campo `frecuencia` de `planes_mantenimiento`
+- `intervalo_dias` pasa a ser `not null`
+- Se crea `planes_ejecuciones` para vincular cada plan con las OT que generó
+
+**Qué tablas afecta:** `planes_mantenimiento`
+
+**Estado actual:**
+
+| Enum | Valores |
+|---|---|
+| `frecuencia_tipo` | `diaria`, `semanal`, `quincenal`, `mensual`, `trimestral`, `semestral`, `anual` |
+
+<br />
+
+### planes_mantenimiento
+
+| Campo | Tipo | Restricciones | Descripción |
+|---|---|---|---|
+| `id` | integer | pk, autoincremental | Identificador único |
+| `activo_id` | integer | ref: activos.id | Activo al que aplica |
+| `tecnico_responsable_id` | integer | ref: usuarios.id | Técnico asignado |
+| `nombre` | varchar | not null | Nombre del plan |
+| `tipo` | tipo_mantenimiento | not null | Tipo de mantenimiento |
+| `frecuencia` | frecuencia_tipo | not null | Frecuencia del plan (se eliminará) |
+| `intervalo_dias` | integer | | Días entre ejecuciones |
+| `proxima_ejecucion` | date | not null | Fecha de la próxima revisión |
+| `descripcion_tareas` | text | | Detalle de las tareas a realizar |
+| `activo` | boolean | default: true | Si el plan está vigente |
+| `created_at` | timestamp | | Fecha de creación |
+
+<br />
+
+**Propuesta:**
+
+### planes_mantenimiento
+
+| Campo | Tipo | Restricciones | Descripción |
+|---|---|---|---|
+| `id` | integer | pk, autoincremental | Identificador único |
+| `activo_id` | integer | ref: activos.id | Activo al que aplica |
+| `tecnico_responsable_id` | integer | ref: usuarios.id | Técnico asignado |
+| `nombre` | varchar | not null | Nombre del plan |
+| `tipo` | tipo_mantenimiento | not null | Tipo de mantenimiento |
+| `intervalo_dias` | integer | not null | Días entre ejecuciones (fuente única) |
+| `proxima_ejecucion` | date | not null | Fecha de la próxima revisión |
+| `descripcion_tareas` | text | | Detalle de las tareas a realizar |
+| `activo` | boolean | default: true | Si el plan está vigente |
+| `created_at` | timestamp | default: now() | Fecha de creación |
+| `updated_at` | timestamp | default: now() | Última actualización |
+
+<br />
+
+### planes_ejecuciones
+
+Tabla nueva que vincula cada plan con las órdenes de trabajo que generó.
+
+| Campo | Tipo | Restricciones | Descripción |
+|---|---|---|---|
+| `id` | integer | pk, autoincremental | Identificador único |
+| `plan_id` | integer | ref: planes_mantenimiento.id | Plan que originó la OT |
+| `ot_id` | integer | ref: ordenes_trabajo.id | Orden de trabajo generada |
+| `fecha_ejecucion` | timestamp | default: now() | Cuándo se ejecutó |
+| `observaciones` | text | | Notas sobre la ejecución |
+| `created_at` | timestamp | default: now() | Fecha de registro |
+| `updated_at` | timestamp | default: now() | Última actualización |
+
+<br />
+
+---
+
+## 4. Firmas digitales en órdenes de trabajo
+
+El campo `validado_gerencia` es un booleano que solo dice si alguien aprobó la orden. No dice quién ni cuándo. Para auditoría necesitamos saber exactamente quién autorizó el gasto.
+
+La propuesta es reemplazar el booleano por una referencia al usuario que firma y un timestamp con la fecha de aprobación.
+
+**Qué cambia:**
+
+- Se elimina `validado_gerencia` de `ordenes_trabajo`
+- Se agrega `validado_por_id` (ref a `usuarios.id`)
+- Se agrega `fecha_validacion`
+- Se agrega soporte multimoneda a los campos de costo (ver propuesta 2)
+- Se renombra `reportes_falla` a `reportes_fallas` (consistencia en plural con las demás tablas)
+
+**Qué tablas afecta:** `ordenes_trabajo`, `reportes_falla`
+
+**Estado actual:**
+
+### ordenes_trabajo
+
+| Campo | Tipo | Restricciones | Descripción |
+|---|---|---|---|
+| `id` | integer | pk, autoincremental | Identificador único |
+| `codigo_ot` | varchar | unique, not null | Código legible (ej: OT-2026-0001) |
+| `activo_id` | integer | ref: activos.id | Activo intervenido |
+| `reporte_id` | integer | ref: reportes_falla.id, null | Origen si es correctivo |
+| `plan_id` | integer | ref: planes_mantenimiento.id, null | Origen si es preventivo |
+| `supervisor_id` | integer | ref: usuarios.id | Supervisor a cargo |
+| `tipo` | tipo_mantenimiento | not null | Tipo de mantenimiento |
+| `estado` | estado_ot | default: abierta | Estado actual de la orden |
+| `fecha_apertura` | timestamp | | Cuándo se abrió la OT |
+| `fecha_inicio_trabajo` | timestamp | | Cuándo arrancó el trabajo |
+| `fecha_cierre` | timestamp | | Cuándo se cerró la OT |
+| `descripcion_trabajo` | text | | Detalle del trabajo realizado |
+| `costo_estimado` | numeric(12,2) | | Costo presupuestado |
+| `costo_real` | numeric(12,2) | | Costo final |
+| `moneda` | varchar(3) | default: USD | Divisa |
+| `validado_gerencia` | boolean | default: false | Validación de gerencia (booleano) |
+| `created_at` | timestamp | | Fecha de creación |
+
+<br />
+
+**Propuesta:**
+
+### ordenes_trabajo
+
+Cambios principales: `validado_gerencia` (boolean) se reemplaza por `validado_por_id` + `fecha_validacion` para trazabilidad de aprobaciones. Los campos de costo usan el patrón multimoneda. El enum de estado se renombra a `estado_orden_trabajo`.
+
+| Campo | Tipo | Restricciones | Descripción |
+|---|---|---|---|
+| `id` | integer | pk, autoincremental | Identificador único |
+| `codigo_ot` | varchar | unique, not null | Código legible (ej: OT-2026-0001) |
+| `activo_id` | integer | ref: activos.id | Activo intervenido |
+| `reporte_id` | integer | ref: reportes_fallas.id, null | Origen si es correctivo |
+| `plan_id` | integer | ref: planes_mantenimiento.id, null | Origen si es preventivo |
+| `supervisor_id` | integer | ref: usuarios.id | Supervisor a cargo |
+| `tipo` | tipo_mantenimiento | not null | Tipo de mantenimiento |
+| `estado` | estado_orden_trabajo | default: abierta | Estado actual de la orden |
+| `fecha_apertura` | timestamp | | Cuándo se abrió la OT |
+| `fecha_inicio_trabajo` | timestamp | | Cuándo arrancó el trabajo |
+| `fecha_cierre` | timestamp | | Cuándo se cerró la OT |
+| `descripcion_trabajo` | text | | Detalle del trabajo realizado |
+| `costo_estimado_original` | numeric(12,2) | | Costo presupuestado en divisa original |
+| `costo_real_original` | numeric(12,2) | | Costo final en divisa original |
+| `costo_estimado_base` | numeric(12,2) | | Presupuesto equivalente en moneda base |
+| `costo_real_base` | numeric(12,2) | | Costo final equivalente en moneda base |
+| `moneda_original` | varchar(3) | null | Divisa original |
+| `tasa_cambio_id` | integer | ref: tasas_cambio.id, null | Tasa aplicada |
+| `validado_por_id` | integer | ref: usuarios.id, null | Usuario que aprobó la OT |
+| `fecha_validacion` | timestamp | | Cuándo se aprobó |
+| `created_at` | timestamp | default: now() | Fecha de creación |
+| `updated_at` | timestamp | default: now() | Última actualización |
+
+<br />
+
+---
+
+## 5. Estandarización de integridad y metadatos
+
+El esquema actual usa `text` libre para campos como el tipo de ubicación o el módulo de permisos. Si alguien escribe "Sede" en un registro y "sede" en otro, el filtro los trata como valores distintos. También faltan timestamps automáticos en varias tablas.
+
+La propuesta es convertir esos campos de texto a enums nativos y agregar `created_at` / `updated_at` con `now()` por defecto en todas las tablas.
+
+**Qué cambia:**
+
+- `tipo` en `ubicaciones` pasa de `varchar` a `enum tipo_ubicacion`
+- `modulo` en `permisos` pasa de `varchar` a `enum modulo_permiso`
+- Campos `text` de longitud corta pasan a `varchar`
+- `articulos_catalogo` gana `nombre` (varchar not null) y `descripcion` (text) para identificar mejor cada artículo del catálogo
+- Todas las tablas ganan `created_at` y `updated_at` con default `now()`
+
+**Qué tablas afecta:** `usuarios`, `roles`, `permisos`, `ubicaciones`, `categorias_articulos`, `articulos_catalogo`, `proveedores`
+
+**Estado actual (ejemplo con `usuarios` y `ubicaciones`):**
+
+### usuarios
+
+| Campo | Tipo | Restricciones | Descripción |
+|---|---|---|---|
+| `id` | integer | pk, autoincremental | Identificador único |
+| `nombre` | text | not null | Nombre completo |
+| `email` | text | unique, not null | Correo electrónico, usado para login |
+| `password_hash` | text | not null | Contraseña cifrada |
+| `telefono` | text | | Teléfono de contacto |
+| `activo` | boolean | default: true | Indica si la cuenta está habilitada |
+| `created_at` | timestamp | | Fecha de creación |
+| `updated_at` | timestamp | | Última actualización |
+
+<br />
+
+### ubicaciones
+
+| Campo | Tipo | Restricciones | Descripción |
+|---|---|---|---|
+| `id` | integer | pk, autoincremental | Identificador único |
+| `parent_id` | integer | ref: ubicaciones.id, null | Ubicación padre (jerarquía) |
+| `nombre` | varchar | not null | Nombre de la ubicación |
+| `tipo` | varchar | not null | Tipo de ubicación (texto libre) |
+| `descripcion` | text | | Descripción adicional |
+
+<br />
+
+**Propuesta:**
+
+| Enum | Valores |
+|---|---|
+| `tipo_ubicacion` | `sede`, `planta`, `area`, `seccion` |
+
+<br />
+
+### usuarios
+
+| Campo | Tipo | Restricciones | Descripción |
+|---|---|---|---|
+| `id` | integer | pk, autoincremental | Identificador único |
+| `nombre` | varchar | not null | Nombre completo |
+| `email` | varchar | unique, not null | Correo electrónico, usado para login |
+| `password_hash` | varchar | not null | Contraseña cifrada |
+| `telefono` | varchar | | Teléfono de contacto |
+| `activo` | boolean | default: true | Indica si la cuenta está habilitada |
+| `created_at` | timestamp | default: now() | Fecha de creación |
+| `updated_at` | timestamp | default: now() | Última actualización |
+
+<br />
+
+### ubicaciones
+
+| Campo | Tipo | Restricciones | Descripción |
+|---|---|---|---|
+| `id` | integer | pk, autoincremental | Identificador único |
+| `parent_id` | integer | ref: ubicaciones.id, null | Ubicación padre (jerarquía) |
+| `nombre` | varchar | not null | Nombre de la ubicación |
+| `tipo` | tipo_ubicacion | not null | Tipo: sede, planta, area, seccion |
+| `descripcion` | text | | Descripción adicional |
+| `created_at` | timestamp | default: now() | Fecha de creación |
+| `updated_at` | timestamp | default: now() | Última actualización |
+
+<br />
+
+---
+
+## 6. Business Intelligence y alertas proactivas
+
+El modelo actual no tiene tablas de KPIs ni alertas. Para ver el MTBF de un activo hay que recorrer todas las órdenes de trabajo y calcular en caliente, lo que degrada el rendimiento con muchos registros.
+
+La propuesta es crear tablas de métricas mensuales precalculadas y una tabla de alertas para avisos de stock bajo o planes vencidos.
+
+**Qué cambia:**
+
+- Se crea `alertas` con campos polimórficos (`entidad_id`, `entidad_tabla`) para vincular a cualquier tabla
+- Se crea `kpis_activos_mensuales` con índice único por `(activo_id, anio, mes)`
+- Se crea `kpis_tecnicos_mensuales` con índice único por `(tecnico_id, anio, mes)`
+
+**Qué tablas afecta:** nuevas tablas, no modifica las existentes
+
+**Estado actual:** no implementado
+
+**Propuesta:**
+
+| Enum | Valores |
+|---|---|
+| `tipo_alerta` | `stock_bajo`, `vencimiento_plan`, `otra` |
+| `estado_alerta` | `pendiente`, `resuelta`, `archivada` |
+
+<br />
+
+### alertas
+
+| Campo | Tipo | Restricciones | Descripción |
+|---|---|---|---|
+| `id` | integer | pk, autoincremental | Identificador único |
+| `tipo` | tipo_alerta | not null | stock_bajo, vencimiento_plan, otra |
+| `entidad_id` | integer | not null | ID de la entidad que genera la alerta |
+| `entidad_tabla` | varchar | not null | Tabla de la entidad (ej: inventario_repuestos) |
+| `mensaje` | text | not null | Texto descriptivo de la alerta |
+| `usuario_atendio_id` | integer | ref: usuarios.id, null | Quién resolvió la alerta |
+| `fecha_atencion` | timestamp | | Cuándo se atendió |
+| `estado` | estado_alerta | default: pendiente | pendiente, resuelta, archivada |
+| `created_at` | timestamp | default: now() | Fecha de creación |
+| `updated_at` | timestamp | default: now() | Última actualización |
+
+<br />
+
+### kpis_activos_mensuales
+
+| Campo | Tipo | Restricciones | Descripción |
+|---|---|---|---|
+| `id` | integer | pk, autoincremental | Identificador único |
+| `activo_id` | integer | ref: activos.id | Activo medido |
+| `anio` | integer | not null | Año del período |
+| `mes` | integer | not null | Mes del período |
+| `tiempo_operativo_horas` | numeric(8,2) | | Horas en estado operativo |
+| `tiempo_inactividad_horas` | numeric(8,2) | | Horas fuera de servicio |
+| `cantidad_fallas` | integer | | Número de fallas reportadas |
+| `cantidad_mantenimientos_preventivos` | integer | | Mantenimientos preventivos ejecutados |
+| `mtbf_horas` | numeric(8,2) | | Tiempo medio entre fallos |
+| `mttr_horas` | numeric(8,2) | | Tiempo medio de reparación |
+| `disponibilidad_porcentaje` | numeric(5,2) | | Porcentaje de disponibilidad |
+| `costo_total_mantenimiento` | numeric(12,2) | | Costo total del mes |
+| `moneda` | varchar(3) | default: USD | Divisa del costo |
+| `calculado_en` | timestamp | default: now() | Cuándo se calculó |
+
+Índice único: `(activo_id, anio, mes)`
+
+<br />
+
+### kpis_tecnicos_mensuales
+
+| Campo | Tipo | Restricciones | Descripción |
+|---|---|---|---|
+| `id` | integer | pk, autoincremental | Identificador único |
+| `tecnico_id` | integer | ref: usuarios.id | Técnico medido |
+| `anio` | integer | not null | Año del período |
+| `mes` | integer | not null | Mes del período |
+| `horas_hombre_totales` | numeric(6,2) | | Total de horas trabajadas en el mes |
+| `ordenes_completadas` | integer | | OT cerradas en el período |
+| `tiempo_promedio_respuesta_minutos` | integer | | Tiempo medio desde asignación hasta inicio |
+| `calculado_en` | timestamp | default: now() | Cuándo se calculó |
+
+Índice único: `(tecnico_id, anio, mes)`
+
+<br />
+
+---
+
+## Resumen de cambios por tabla
+
+| Tabla | Cambio | Propuesta |
+|---|---|---|
+| `auditoria_sistema` | Renombrada a `auditorias_sistema` | 1 |
+| `logs_estados_ordenes_trabajo` | Nueva tabla | 1 |
+| `auditorias_cambios` | Nueva tabla | 1 |
+| `tasas_cambio` | Nueva tabla | 2 |
+| `activos` | Campos multimoneda + `updated_at` | 2 |
+| `ordenes_trabajo` | Firma digital + multimoneda | 2, 4 |
+| `inventario_repuestos` | Campos multimoneda + `updated_at` | 2 |
+| `entradas_inventario` | Campos multimoneda + `updated_at` | 2 |
+| `planes_mantenimiento` | Eliminar `frecuencia`, `intervalo_dias` not null | 3 |
+| `planes_ejecuciones` | Nueva tabla | 3 |
+| `usuarios` | `text` → `varchar`, timestamps con default | 5 |
+| `roles` | Timestamps con default | 5 |
+| `permisos` | `modulo` → enum, timestamps con default | 5 |
+| `ubicaciones` | `tipo` → enum, timestamps con default | 5 |
+| `categorias_articulos` | `text` → `varchar`, timestamps con default | 5 |
+| `articulos_catalogo` | Nuevos campos (`nombre`, `descripcion`), timestamps con default | 5 |
+| `proveedores` | `text` → `varchar`, timestamps con default | 5 |
+| `alertas` | Nueva tabla | 6 |
+| `kpis_activos_mensuales` | Nueva tabla | 6 |
+| `kpis_tecnicos_mensuales` | Nueva tabla | 6 |
