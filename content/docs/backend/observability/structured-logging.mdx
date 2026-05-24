@@ -1,8 +1,127 @@
 ---
 title: Structured Logging
-description: Documentación sobre Structured Logging
+description: Configuración de logging estructurado con structlog. Salida JSON en producción, consola coloreada en desarrollo y contexto enriquecido con pares clave-valor.
 ---
 
 # Structured Logging
 
-Contenido en desarrollo para Structured Logging.
+GEMA utiliza [structlog](https://www.structlog.org/) para generar logs
+estructurados con pares clave-valor en lugar de cadenas de texto planas. Cada
+entrada de log es un objeto JSON en producción, lo que facilita su
+procesamiento por herramientas como Elasticsearch, Loki o Datadog.
+
+## Configuración
+
+La función `setup_logging()` (en
+`src/app/infrastructure/config/logger.py`) se invoca al iniciar la aplicación
+desde el lifespan de `main.py`:
+
+```python
+from app.infrastructure.config.logger import logger, setup_logging
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+    setup_logging(settings.APP_ENV)
+    logger.info("app_starting", env=settings.APP_ENV, version=settings.APP_VERSION)
+    yield
+    await engine.dispose()
+    logger.info("app_shutdown")
+```
+
+### Procesadores
+
+structlog aplica una cadena de procesadores a cada mensaje antes de emitirlo:
+
+```python
+structlog.configure(
+    processors=[
+        structlog.contextvars.merge_contextvars,
+        structlog.stdlib.add_log_level,
+        structlog.processors.TimeStamper(fmt="iso"),
+        structlog.processors.StackInfoRenderer(),
+        structlog.dev.ConsoleRenderer()
+        if app_env == "development"
+        else structlog.processors.JSONRenderer(),
+    ],
+    logger_factory=structlog.stdlib.LoggerFactory(),
+    wrapper_class=structlog.stdlib.BoundLogger,
+    cache_logger_on_first_use=True,
+)
+```
+
+| Procesador | Propósito |
+|---|---|
+| `merge_contextvars` | Fusiona variables de contexto (ej. `request_id`) en cada entrada de log |
+| `add_log_level` | Añade el nivel del log (`info`, `error`, etc.) |
+| `TimeStamper(fmt="iso")` | Añade un timestamp en formato ISO 8601 |
+| `StackInfoRenderer` | Incluye información de la pila de llamadas |
+| `ConsoleRenderer` / `JSONRenderer` | Formato de salida según el entorno |
+
+### Salida por entorno
+
+| Entorno | Renderizador | Ejemplo de salida |
+|---|---|---|
+| `development` | `ConsoleRenderer` | Texto coloreado legible en terminal |
+| `production` | `JSONRenderer` | `{"event": "app_starting", "env": "production", "version": "0.1.0", "timestamp": "..."}` |
+
+## Cómo usar el logger
+
+```python
+from app.infrastructure.config.logger import logger
+
+logger.info("user_registered", email=email.value, user_id=str(user.id))
+logger.error("db_connection_failed", database=settings.DATABASE_URL)
+logger.warning("rate_limit_exceeded", path=request.url.path, client_ip=client_ip)
+```
+
+Cada argumento con nombre se convierte en un par clave-valor dentro del log
+estructurado. Puedes añadir cualquier contexto que ayude a depurar:
+
+```python
+logger.info(
+    "token_refreshed",
+    user_id=sub,
+    old_jti=jti,
+    new_token_type="refresh",
+)
+```
+
+## Integración con logging estándar
+
+structlog captura los logs de librerías que usan el módulo `logging` estándar
+(uvicorn, SQLAlchemy, Alembic) gracias al wrapper `structlog.stdlib.LoggerFactory`:
+
+```python
+logging.basicConfig(level=logging.INFO, format="%(message)s")
+```
+
+Esto garantiza que toda la salida de la aplicación tenga el mismo formato
+estructurado, sin mezclar texto plano con JSON.
+
+## Contexto enriquecido con `request_id`
+
+El middleware `RequestIdMiddleware` asigna un UUID único a cada solicitud y lo
+almacena en `request.state.request_id`. Si usas `structlog.contextvars` desde
+un endpoint o middleware, puedes adjuntarlo a los logs:
+
+```python
+import structlog
+
+logger = structlog.get_logger()
+structlog.contextvars.bind_contextvars(request_id=request.state.request_id)
+```
+
+El procesador `merge_contextvars` lo incluirá automáticamente en cada entrada
+de log dentro de ese contexto.
+
+> [!NOTE]
+> La vinculación automática de `request_id` al contextvar de structlog aún no
+> está implementada. Actualmente el `RequestIdMiddleware` asigna el ID al
+> `request.state`, pero no lo inyecta en contextvars. Esto está planeado.
+
+## Próximos pasos
+
+- Consulta cómo se correlacionan las solicitudes en
+  [Correlation](./correlation).
+- Revisa las recomendaciones para [métricas](./metrics) y
+  [trazado distribuido](./tracing).

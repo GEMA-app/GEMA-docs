@@ -1,8 +1,92 @@
 ---
-title: Cache
-description: Documentación sobre Cache
+title: Cache con Redis
+description: Cliente asíncrono global para blocklist JWT y rate limiting
 ---
 
-# Cache
+Redis se usa como almacenamiento en memoria para dos funcionalidades
+críticas: la lista de bloqueo de tokens JWT (blocklist) y el contador de
+rate limiting.
 
-Contenido en desarrollo para Cache.
+## Cliente global
+
+Archivo: `src/app/infrastructure/cache/redis.py`
+
+```python
+import redis.asyncio as aioredis
+from app.infrastructure.config.settings import settings
+
+
+redis_client = aioredis.from_url(
+    settings.REDIS_URL,
+    decode_responses=True,
+)
+
+
+async def get_redis() -> aioredis.Redis:
+    """Devuelve la instancia global del cliente asíncrono de Redis."""
+    return redis_client
+```
+
+El cliente se crea una sola vez al importar el módulo y se reusa durante
+toda la vida de la aplicación.
+
+> [!NOTE]
+> `decode_responses=True` hace que Redis devuelva strings en lugar de
+> bytes. Así trabajas con `str` directamente sin tener que llamar a
+> `.decode('utf-8')` en cada respuesta.
+
+## Uso en blocklist JWT
+
+`PyJwtTokenService` (en `security/jwt.py`) usa Redis para marcar tokens
+como revocados:
+
+```python
+async def revoke_token(self, jti: str, exp: int) -> None:
+    now = int(datetime.now(timezone.utc).timestamp())
+    ttl = exp - now
+    if ttl > 0:
+        await self.redis.set(f"blocklist:{jti}", "revoked", ex=ttl)
+```
+
+Cada JTI se guarda con un TTL igual al tiempo de vida restante del token.
+Cuando el token expira, Redis lo borra automáticamente. La blocklist nunca
+crece de forma indefinida.
+
+Al decodificar un token:
+
+```python
+async def decode_token(self, token: str) -> dict[str, Any]:
+    claims = jwt.decode(token, ...)
+    jti = claims["jti"]
+    is_revoked = await self.redis.get(f"blocklist:{jti}")
+    if is_revoked:
+        raise InvalidTokenError("El token ha sido revocado.")
+    return claims
+```
+
+## Uso en rate limiting
+
+El middleware `RateLimitMiddleware` usa un script Lua atómico para contar
+peticiones por IP y endpoint:
+
+```lua
+local current = redis.call('INCR', KEYS[1])
+if current == 1 then
+    redis.call('EXPIRE', KEYS[1], ARGV[1])
+end
+return current
+```
+
+El script se ejecuta como una sola operación atómica en Redis, evitando
+race conditions entre `INCR` y `EXPIRE`.
+
+> [!NOTE]
+> El rate limiter usa **fail-open**: si Redis no responde, la petición se
+> permite y se registra un error. Es preferible permitir más peticiones de
+> las debidas a bloquear toda la API.
+
+## Próximos pasos
+
+Revisa el [Ciclo de vida de una petición](../architecture/request-lifecycle)
+para ver cómo Redis interviene en el pipeline de middlewares y en la
+autenticación.

@@ -1,8 +1,116 @@
 ---
 title: Tracing
-description: Documentación sobre Tracing
+description: Recomendaciones para la implementación de trazado distribuido en GEMA. Sin implementación actual; documentación preparatoria para OpenTelemetry.
 ---
 
 # Tracing
 
-Contenido en desarrollo para Tracing.
+> [!NOTE]
+> Esta es una funcionalidad experimental que aún está en desarrollo activo.
+> No hay ninguna librería de tracing instalada ni configuración implementada.
+
+El trazado distribuido (distributed tracing) permite seguir una solicitud a
+través de todos los componentes que intervienen en su procesamiento:
+middlewares, casos de uso, repositorios, Redis y base de datos. Aunque GEMA
+es un monolito, el tracing sigue siendo útil para medir tiempos y detectar
+cuellos de botella.
+
+## Stack recomendado
+
+| Herramienta | Propósito |
+|---|---|
+| [OpenTelemetry](https://opentelemetry.io/) | SDK estándar para generación de trazas |
+| [opentelemetry-instrumentation-fastapi](https://pypi.org/project/opentelemetry-instrumentation-fastapi/) | Instrumentación automática de endpoints FastAPI |
+| [opentelemetry-instrumentation-sqlalchemy](https://pypi.org/project/opentelemetry-instrumentation-sqlalchemy/) | Trazas de consultas SQLAlchemy |
+| [opentelemetry-instrumentation-redis](https://pypi.org/project/opentelemetry-instrumentation-redis/) | Trazas de operaciones Redis |
+| [Jaeger](https://www.jaegertracing.io/) o [Grafana Tempo](https://grafana.com/oss/tempo/) | Backend de almacenamiento y visualización |
+
+## Instrumentación prevista
+
+### FastAPI
+
+```python
+# Planeado — no implementado
+from opentelemetry import trace
+from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+
+tracer = trace.get_tracer(__name__)
+
+app = FastAPI(title=settings.APP_TITLE, version=settings.APP_VERSION)
+
+FastAPIInstrumentor.instrument_app(app)
+```
+
+### SQLAlchemy
+
+```python
+# Planeado — no implementado
+from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
+
+SQLAlchemyInstrumentor().instrument(engine=engine.sync_engine)
+```
+
+### Redis
+
+```python
+# Planeado — no implementado
+from opentelemetry.instrumentation.redis import RedisInstrumentor
+
+RedisInstrumentor().instrument()
+```
+
+### Trazas personalizadas
+
+Puedes crear trazas manuales para operaciones de negocio específicas:
+
+```python
+# Planeado — no implementado
+with tracer.start_as_current_span("register_user") as span:
+    span.set_attribute("email", email.value)
+    result = await use_case.execute(dto_req)
+```
+
+## Propagación de contexto
+
+Cuando el sistema reciba solicitudes desde un gateway o balanceador, el
+contexto de tracing se propagará mediante las cabeceras estándar de W3C:
+
+- `traceparent` — versión, trace ID, span ID y flags
+- `tracestate` — información adicional del proveedor
+
+FastAPIInstrumentor extrae estas cabeceras automáticamente y crea el contexto
+adecuado.
+
+## Correlación con logs
+
+Los trace IDs se pueden incluir en los logs estructurados para correlacionar
+trazas con entradas de log:
+
+```python
+# Planeado — no implementado
+span = trace.get_current_span()
+span_context = span.get_span_context()
+structlog.contextvars.bind_contextvars(
+    trace_id=format_trace_id(span_context.trace_id),
+    span_id=format_span_id(span_context.span_id),
+)
+```
+
+## Dependencias para añadir en `pyproject.toml`
+
+Cuando se implemente, estas son las dependencias necesarias:
+
+```toml
+[tool.poetry.dependencies]
+opentelemetry-api = "^1.30"
+opentelemetry-sdk = "^1.30"
+opentelemetry-instrumentation-fastapi = "^0.50b"
+opentelemetry-instrumentation-sqlalchemy = "^0.50b"
+opentelemetry-instrumentation-redis = "^0.50b"
+opentelemetry-exporter-otlp = "^1.30"
+```
+
+## Próximos pasos
+
+- Consulta la documentación de [métricas](./metrics).
+- Revisa cómo se correlacionan las solicitudes con [Correlation](./correlation).

@@ -1,8 +1,106 @@
 ---
-title: Repositories
-description: Documentación sobre Repositories
+title: Repositorios
+description: SqlAlchemyUserRepository, persistencia, consultas y mapeo entidad ↔ modelo
 ---
 
-# Repositories
+Los repositorios implementan los puertos definidos en `application/ports/`
+y traducen entre entidades de dominio y modelos ORM.
 
-Contenido en desarrollo para Repositories.
+## `SqlAlchemyUserRepository`
+
+Archivo: `src/app/infrastructure/repositories/user_repository.py`
+
+Implementa `UserRepositoryPort` usando SQLAlchemy 2.0 y `asyncpg`.
+
+```python
+class SqlAlchemyUserRepository(UserRepositoryPort):
+
+    def __init__(self, session: AsyncSession) -> None:
+        self.session = session
+```
+
+Recibe la sesión en el constructor. La sesión es creada por el Unit of Work
+(ver [Unit of Work](../application/unit-of-work)).
+
+### `save()`
+
+```python
+async def save(self, user: User) -> None:
+    model = self._to_model(user)
+    await self.session.merge(model)
+```
+
+Usa `session.merge()` que funciona tanto para insert como para update. El
+método **nunca** hace `session.commit()`. Solo agrega el cambio a la
+transacción actual.
+
+### `get_by_email()` y `get_by_id()`
+
+```python
+async def get_by_email(self, email: Email) -> Optional[User]:
+    stmt = select(UserModel).where(UserModel.email == email.value)
+    result = await self.session.execute(stmt)
+    model = result.scalar_one_or_none()
+    if not model:
+        return None
+    return self._to_entity(model)
+
+
+async def get_by_id(self, id: UserId) -> Optional[User]:
+    stmt = select(UserModel).where(UserModel.id == id.value)
+    result = await self.session.execute(stmt)
+    model = result.scalar_one_or_none()
+    if not model:
+        return None
+    return self._to_entity(model)
+```
+
+Ambos usan `select()` + `scalar_one_or_none()`. Si no hay resultado,
+devuelven `None`.
+
+### Traducción entidad ↔ modelo
+
+```python
+def _to_model(self, user: User) -> UserModel:
+    return UserModel(
+        id=user.id.value,
+        email=user.email.value,
+        hashed_password=user.hashed_password.value,
+        is_active=user.is_active,
+        created_at=user.created_at,
+        updated_at=user.updated_at,
+    )
+
+def _to_entity(self, model: UserModel) -> User:
+    return User(
+        id=UserId(value=model.id),
+        email=Email(value=model.email),
+        hashed_password=HashedPassword(value=model.hashed_password),
+        is_active=model.is_active,
+        created_at=model.created_at,
+        updated_at=model.updated_at,
+    )
+```
+
+Cada value object se extrae con `.value` al convertir a modelo, y se
+reconstruye pasando el valor al constructor al convertir a entidad.
+
+> [!WARNING]
+> El repositorio **nunca** hace `session.commit()`. Solo usa
+> `session.add()` o `session.merge()`. El commit es responsabilidad
+> exclusiva del Unit of Work. Si un repositorio hiciera commit, rompería
+> la frontera transaccional.
+
+## Flujo completo
+
+```
+Caso de uso
+  → async with self.uow:
+      → uow.users.save(user)    ← add/merge, no commit
+      → await uow.commit()      ← aquí se hace el commit real
+```
+
+## Próximos pasos
+
+Las [Migraciones con Alembic](./migrations) te permiten crear y modificar
+las tablas que estos repositorios consultan.

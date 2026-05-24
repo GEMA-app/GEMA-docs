@@ -1,8 +1,88 @@
 ---
 title: Correlation
-description: Documentación sobre Correlation
+description: Identificación de solicitudes mediante correlación con RequestIdMiddleware. Asignación de UUID único por petición y propagación del identificador en logs y respuestas.
 ---
 
 # Correlation
 
-Contenido en desarrollo para Correlation.
+> [!NOTE]
+> La propagación de identificadores de correlación a través de contextvars de
+> structlog es una funcionalidad experimental en desarrollo activo.
+
+La correlación permite rastrear una solicitud a través de los diferentes
+componentes del sistema. Cada petición recibe un identificador único (UUID)
+que se incluye en las respuestas y en los logs.
+
+## RequestIdMiddleware
+
+El middleware `RequestIdMiddleware` (en
+`src/app/presentation/middlewares/request_id.py`) genera o reutiliza un
+identificador único por solicitud:
+
+```python
+class RequestIdMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next) -> Response:
+        request_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
+        request.state.request_id = request_id
+        response = await call_next(request)
+        response.headers["X-Request-ID"] = request_id
+        return response
+```
+
+El comportamiento es:
+
+1. Si el cliente envía un `X-Request-ID` en la cabecera, se reutiliza.
+2. Si no lo envía, se genera un UUID v4 nuevo.
+3. El ID se almacena en `request.state.request_id` para que cualquier
+   middleware o endpoint pueda accederlo.
+4. El ID se incluye en la respuesta como cabecera `X-Request-ID`.
+
+Esto permite que el cliente original pueda correlacionar sus logs con los del
+servidor usando el mismo identificador.
+
+## Acceso en endpoints y middlewares
+
+Puedes acceder al `request_id` desde cualquier punto de la cadena de
+procesamiento:
+
+```python
+@router.get("/me")
+async def get_current_user(
+    request: Request,
+    token: HTTPAuthorizationCredentials = Depends(security),
+    use_case: GetCurrentUserUseCase = Depends(get_get_current_user_use_case),
+) -> UserDocument:
+    request_id = request.state.request_id
+    logger.info("get_current_user", request_id=request_id)
+    ...
+```
+
+## Estado actual y planeado
+
+| Aspecto | Estado |
+|---|---|
+| UUID único por solicitud | Implementado |
+| Cabecera `X-Request-ID` en respuesta | Implementado |
+| Reutilización de `X-Request-ID` entrante | Implementado |
+| Vinculación automática a structlog contextvars | Planeado |
+| Propagación a tareas en segundo plano | Planeado |
+| Propagación entre servicios | No aplica (monolito) |
+
+### Vinculación con structlog (planeado)
+
+Cuando esté implementado, el `RequestIdMiddleware` vinculará el
+`request.state.request_id` a `structlog.contextvars` automáticamente:
+
+```python
+# Planeado — no implementado aún
+structlog.contextvars.bind_contextvars(request_id=request.state.request_id)
+```
+
+El procesador `merge_contextvars` (ya configurado en `logger.py`) lo añadirá a
+cada entrada de log.
+
+## Próximos pasos
+
+- Revisa la configuración de [logging estructurado](./structured-logging) para
+  entender cómo se emiten los logs con contexto.
+- Consulta las recomendaciones sobre [trazado distribuido](./tracing).

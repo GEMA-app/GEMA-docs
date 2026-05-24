@@ -1,8 +1,85 @@
 ---
-title: Orm Models
-description: Documentación sobre Orm Models
+title: Modelos ORM
+description: UserModel, columnas, tipos, índices y mapeo a la tabla users
 ---
 
-# Orm Models
+Los modelos ORM son las clases que representan tablas de la base de datos.
+Heredan de `Base` (declarada en `db/base.py`) y usan `Mapped` + `mapped_column`
+de SQLAlchemy 2.0.
 
-Contenido en desarrollo para Orm Models.
+## `UserModel`
+
+Archivo: `src/app/infrastructure/db/models.py`
+
+```python
+from datetime import datetime, timezone
+import uuid
+from sqlalchemy import DateTime
+from sqlalchemy.orm import Mapped, mapped_column
+from app.infrastructure.db.base import Base
+
+
+class UserModel(Base):
+    """Modelo ORM para la tabla de usuarios."""
+
+    __tablename__ = "users"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    email: Mapped[str] = mapped_column(
+        unique=True, index=True, nullable=False
+    )
+    hashed_password: Mapped[str] = mapped_column(nullable=False)
+    is_active: Mapped[bool] = mapped_column(default=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+```
+
+### Columnas
+
+| Columna | Tipo | Restricciones |
+|---|---|---|
+| `id` | `uuid.UUID` | Primary key |
+| `email` | `str` | `unique=True`, `index=True`, `nullable=False` |
+| `hashed_password` | `str` | `nullable=False` |
+| `is_active` | `bool` | `default=True`, `nullable=False` |
+| `created_at` | `datetime` | `DateTime(timezone=True)`, default al momento de creación |
+| `updated_at` | `datetime` | `DateTime(timezone=True)`, default + `onupdate` al momento de modificación |
+
+> [!TIP]
+> `onupdate=lambda: datetime.now(timezone.utc)` en `updated_at` hace que
+> SQLAlchemy actualice automáticamente la columna cada vez que se modifica
+> el registro. No necesitas asignarlo manualmente.
+
+### ¿Por qué no se usa el modelo como entidad?
+
+El modelo ORM (`UserModel`) es solo para la base de datos. La entidad de
+dominio (`User`) es la que tiene comportamiento y reglas de negocio. La
+traducción entre ambas la hace el repositorio (ver [Repositorios](./repositories)).
+
+```
+UserModel (SQLAlchemy)  →  UserRepositoryPort  →  User (entidad dominio)
+   ↑                            ↓
+Tabla "users"         SqlAlchemyUserRepository
+```
+
+## Convenciones
+
+- El nombre de la tabla en plural (`users`).
+- La primary key siempre es `id` de tipo `uuid.UUID`.
+- Las columnas de fecha usan `DateTime(timezone=True)` y siempre en UTC.
+- Los índices se declaran con `index=True` en la columna, no como
+  `Index()` separado a menos que sean compuestos.
+
+## Próximos pasos
+
+Los [Repositorios](./repositories) usan `UserModel` para traducir entre la
+base de datos y las entidades de dominio.

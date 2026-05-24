@@ -1,8 +1,95 @@
 ---
-title: Async Sqlalchemy
-description: Documentación sobre Async Sqlalchemy
+title: SQLAlchemy asíncrono
+description: Engine asíncrono, session factory y clase base declarativa
 ---
 
-# Async Sqlalchemy
+Esta página describe cómo se configura la conexión a PostgreSQL usando
+SQLAlchemy 2.0 con `asyncpg`.
 
-Contenido en desarrollo para Async Sqlalchemy.
+## Engine asíncrono
+
+Archivo: `src/app/infrastructure/db/session.py`
+
+```python
+from sqlalchemy.ext.asyncio import (
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
+from app.infrastructure.config.settings import settings
+
+
+engine = create_async_engine(
+    settings.DATABASE_URL,
+    echo=settings.APP_DEBUG,
+    future=True,
+)
+```
+
+El engine se crea al importar el módulo y vive durante toda la vida de la
+aplicación. Se cierra en el `lifespan` de FastAPI con `await engine.dispose()`.
+
+## Session factory
+
+```python
+async_session_factory = async_sessionmaker(
+    engine,
+    class_=AsyncSession,
+    expire_on_commit=False,
+    autoflush=False,
+)
+```
+
+Parámetros clave:
+
+- `expire_on_commit=False` — evita que SQLAlchemy expire todos los objetos
+  después de `commit()`. Necesario para acceder a atributos de entidades
+  después de persistir.
+- `autoflush=False` — evita flushes automáticos antes de cada consulta. El
+  control del flush queda en el Unit of Work.
+
+> [!NOTE]
+> Con `expire_on_commit=True` (valor por defecto), después de `commit()`
+> todos los objetos quedan en estado "expired" y任何 acceso a atributos
+> dispara una consulta SQL adicional. Con `False` los objetos mantienen sus
+> datos.
+
+## Generador para inyección
+
+```python
+async def get_session() -> AsyncGenerator[AsyncSession, None]:
+    """Generador asíncrono para inyección de dependencias de la sesión."""
+    async with async_session_factory() as session:
+        yield session
+```
+
+Se usa en el contenedor de dependencias mediante `Depends()`. FastAPI abre
+la sesión al inicio de la petición y la cierra al final.
+
+## Clase base declarativa
+
+Archivo: `src/app/infrastructure/db/base.py`
+
+```python
+from sqlalchemy.ext.asyncio import AsyncAttrs
+from sqlalchemy.orm import DeclarativeBase
+
+
+class Base(AsyncAttrs, DeclarativeBase):
+    """Clase base declarativa para todos los modelos ORM."""
+    pass
+```
+
+`Base` es la clase de la que heredan todos los modelos. Está separada de
+`models.py` para evitar **importaciones circulares** cuando Alembic necesita
+importar `Base.metadata`.
+
+> [!WARNING]
+> No agregues modelos directamente en `base.py`. `Base` debe ser un archivo
+> mínimo que solo importe `AsyncAttrs` y `DeclarativeBase`. Los modelos van
+> en `models.py` e importan `Base` desde aquí.
+
+## Próximos pasos
+
+Los [Modelos ORM](./orm-models) son las clases concretas que heredan de
+`Base` y definen las tablas de la base de datos.

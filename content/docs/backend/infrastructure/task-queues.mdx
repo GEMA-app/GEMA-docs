@@ -1,8 +1,33 @@
 ---
-title: Task Queues
-description: Documentación sobre Task Queues
+title: Colas de tareas
+description: Procesamiento asíncrono de tareas en segundo plano (planeado)
 ---
 
-# Task Queues
+> [!NOTE]
+> Esta es una funcionalidad planeada que aún está en desarrollo activo.
 
-Contenido en desarrollo para Task Queues.
+Las colas de tareas permiten ejecutar trabajo pesado fuera del ciclo de la
+petición HTTP, como enviar correos, generar embeddings o procesar archivos.
+
+### Comportamiento esperado
+
+1. El caso de uso encola una tarea (ej: enviar email de bienvenida).
+2. La tarea se guarda en Redis o en una tabla de base de datos.
+3. Un worker externo consume la cola y ejecuta la tarea.
+4. Si la tarea falla, se reintenta o se mueve a una cola de fallos.
+
+### Posibles usos
+
+- Envío de correos electrónicos después de `UserRegistered`
+- Generación de embeddings para búsqueda semántica
+- Limpieza de datos programada
+- Sincronización con servicios externos
+
+### Archivos relacionados
+
+- `src/app/infrastructure/external/worker.py`
+
+## Próximos pasos
+
+Los [Puertos de IA](../infrastructure/ai-ports) son un ejemplo de tarea que
+se beneficiaría del procesamiento asíncrono en cola.

@@ -1,8 +1,83 @@
 ---
-title: Migrations
-description: Documentación sobre Migrations
+title: Migraciones con Alembic
+description: Inicialización async, autogenerate y ejecución de migraciones
 ---
 
-# Migrations
+Las migraciones gestionan los cambios en el esquema de la base de datos.
+Alembic las ejecuta en orden y lleva la cuenta de cuáles ya se aplicaron.
 
-Contenido en desarrollo para Migrations.
+## Inicialización
+
+```bash
+docker compose exec app alembic init -t async migrations
+```
+
+El flag `-t async` genera un `env.py` preparado para SQLAlchemy asíncrono.
+Esto crea la carpeta `migrations/` con `env.py`, `script.py.mako` y
+`versions/`.
+
+## Configurar `env.py`
+
+El archivo `migrations/env.py` debe importar `Base.metadata` y todos los
+modelos para que Alembic detecte los cambios:
+
+```python
+from app.infrastructure.db.base import Base
+from app.infrastructure.db.models import UserModel  # importa todos los modelos
+
+target_metadata = Base.metadata
+
+
+def run_async_migrations() -> None:
+    connectable = create_async_engine(settings.DATABASE_URL)
+    # ...
+```
+
+> [!WARNING]
+> `env.py` debe importar solo `Base` y los modelos para poblar
+> `target_metadata`. No importes lógica de aplicación que cause side
+> effects (como crear clientes de Redis o inicializar logging).
+
+## Crear una migración
+
+```bash
+docker compose exec app alembic revision --autogenerate -m "descripcion_del_cambio"
+```
+
+Alembic compara `Base.metadata` con el estado actual de la base de datos y
+genera un archivo de migración en `migrations/versions/`.
+
+## Aplicar migraciones
+
+```bash
+docker compose exec app alembic upgrade head
+```
+
+Este comando ejecuta todas las migraciones pendientes hasta la más reciente.
+
+## Reglas importantes
+
+- Todas las migraciones se ejecutan **dentro del contenedor**, nunca desde
+  el host. Así usan la misma configuración de red y las mismas variables de
+  entorno.
+- No montes `alembic.ini` como volumen. Si Docker monta un archivo que no
+  existe en el host, crea un **directorio** en su lugar y rompe la
+  configuración.
+- El archivo `alembic.ini` se genera dentro del contenedor con `alembic init`
+  y se copia al host si es necesario.
+
+> [!WARNING]
+> Nunca montes `alembic.ini` como volumen antes de que el archivo exista en
+> el host. Si Docker no lo encuentra, crea un directorio en su lugar y
+> corrompe el entorno.
+
+## Verificación
+
+```bash
+docker compose exec db psql -U sigma -d sigma_db -c "\dt"
+```
+
+## Próximos pasos
+
+Vuelve a los [Repositorios](./repositories) para ver cómo las tablas creadas
+por las migraciones se usan desde el código de la aplicación.

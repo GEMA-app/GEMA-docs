@@ -1,8 +1,39 @@
 ---
 title: Transactional Outbox
-description: Documentación sobre Transactional Outbox
+description: Publicación confiable de eventos sin perder datos (planeado)
 ---
 
-# Transactional Outbox
+> [!NOTE]
+> Esta es una funcionalidad planeada que aún está en desarrollo activo.
 
-Contenido en desarrollo para Transactional Outbox.
+El patrón Transactional Outbox garantiza que los eventos de dominio se
+publiquen de forma confiable sin riesgo de perderlos si el publicador falla.
+
+### El problema
+
+Cuando un caso de uso persiste datos y emite eventos, ambos deben ocurrir
+de forma atómica. Si la base de datos guarda los datos pero el dispatcher
+falla al publicar el evento, el sistema queda inconsistente.
+
+### La solución
+
+En lugar de publicar eventos directamente, se guardan en una tabla `outbox`
+dentro de la **misma transacción** de base de datos. Un proceso separado
+(worker) lee la tabla y publica los eventos de forma confiable.
+
+```
+Caso de uso
+  → UoW commit (datos + evento en tabla outbox)
+    → Worker lee outbox
+      → Publica evento al dispatcher
+        → Marca evento como publicado
+```
+
+### Archivos relacionados
+
+- `src/app/infrastructure/events/outbox.py`
+
+## Próximos pasos
+
+Las [Colas de tareas](./task-queues) son el mecanismo que puede consumir los
+eventos del outbox para procesarlos en segundo plano.

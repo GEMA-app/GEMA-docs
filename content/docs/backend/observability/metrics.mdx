@@ -1,8 +1,86 @@
 ---
 title: Metrics
-description: Documentación sobre Metrics
+description: Recomendaciones para la implementación de métricas en GEMA. Sin implementación actual; documentación preparatoria para Prometheus y OpenTelemetry.
 ---
 
 # Metrics
 
-Contenido en desarrollo para Metrics.
+> [!NOTE]
+> Esta es una funcionalidad experimental que aún está en desarrollo activo.
+> No hay ningún cliente de métricas instalado ni middlewares implementados.
+
+Las métricas permiten monitorizar el estado y rendimiento de la aplicación en
+tiempo real. GEMA no tiene métricas implementadas todavía, pero esta página
+documenta las decisiones previstas para cuando se aborde.
+
+## Stack recomendado
+
+| Herramienta | Propósito |
+|---|---|
+| [Prometheus](https://prometheus.io/) | Recolección y almacenamiento de métricas |
+| [Grafana](https://grafana.com/) | Visualización de métricas en dashboards |
+| [prometheus-fastapi-instrumentator](https://github.com/trallnag/prometheus-fastapi-instrumentator) | Instrumentación automática de endpoints FastAPI |
+| `prometheus_client` | Cliente Python para métricas personalizadas |
+
+## Métricas a exponer
+
+### Métricas HTTP (automáticas con instrumentator)
+
+- `http_requests_total` — contador de solicitudes por método, ruta y código de
+  estado
+- `http_request_duration_seconds` — histograma de duración de solicitudes
+- `http_requests_in_progress` — gauge de solicitudes activas
+
+### Métricas de base de datos
+
+- `db_query_duration_seconds` — duración de queries SQLAlchemy
+- `db_connection_pool_size` — tamaño del pool de conexiones
+- `db_connection_errors_total` — errores de conexión
+
+### Métricas de Redis
+
+- `redis_operation_duration_seconds` — duración de operaciones Redis
+- `redis_errors_total` — errores de operaciones Redis
+- `blocklist_size` — número de tokens en la blocklist
+
+### Métricas de negocio
+
+- `auth_register_total` — registros de usuario
+- `auth_login_total` — inicios de sesión
+- `auth_login_failures_total` — inicios de sesión fallidos
+- `auth_token_refresh_total` — rotaciones de token
+- `auth_token_revocation_total` — revocaciones de token
+
+## Integración con FastAPI
+
+Para exponer métricas en el formato de Prometheus, se añadiría un endpoint
+`GET /metrics` y el middleware de instrumentación en `main.py`:
+
+```python
+# Planeado — no implementado
+from prometheus_fastapi_instrumentator import Instrumentator
+
+instrumentator = Instrumentator().instrument(app)
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+    setup_logging(settings.APP_ENV)
+    instrumentator.expose(app, endpoint="/metrics")
+    yield
+    await engine.dispose()
+```
+
+## Alternativa con OpenTelemetry
+
+Si el sistema escala a múltiples servicios, puedes usar OpenTelemetry en lugar
+de Prometheus directo:
+
+- `opentelemetry-api` + `opentelemetry-sdk`
+- `opentelemetry-instrumentation-fastapi`
+- Exportador a Prometheus o a un backend OTLP (Jaeger, Tempo, Grafana Cloud)
+
+## Próximos pasos
+
+- Consulta la configuración de [trazado distribuido](./tracing).
+- Revisa la documentación de [logging estructurado](./structured-logging) para
+  entender la base de observabilidad actual.

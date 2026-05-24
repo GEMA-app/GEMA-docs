@@ -1,8 +1,31 @@
 ---
 title: Event Dispatcher
-description: Documentación sobre Event Dispatcher
+description: Publicación y suscripción de eventos de dominio (planeado)
 ---
 
-# Event Dispatcher
+> [!NOTE]
+> Esta es una funcionalidad planeada que aún está en desarrollo activo.
 
-Contenido en desarrollo para Event Dispatcher.
+El Event Dispatcher será el componente que toma los eventos de dominio
+acumulados por `pull_events()` y los publica a suscriptores registrados.
+
+Actualmente los eventos se generan en las entidades (`UserRegistered`,
+`UserLoggedIn`) pero no se publican. El dispatcher llenará ese vacío.
+
+### Comportamiento esperado
+
+1. El caso de uso completa la transacción y hace `commit()`.
+2. Después del commit, llama al dispatcher con los eventos.
+3. El dispatcher entrega cada evento a sus suscriptores (síncrona o
+   asíncronamente).
+
+### Archivos relacionados
+
+- `src/app/infrastructure/events/dispatcher.py` — implementación del
+  dispatcher
+- `src/app/domain/events.py` — clases de eventos que el dispatcher manejará
+
+## Próximos pasos
+
+El [Transactional Outbox](./transactional-outbox) es el patrón que garantiza
+que ningún evento se pierda incluso si la publicación falla.
