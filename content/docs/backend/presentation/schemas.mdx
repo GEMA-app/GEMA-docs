@@ -1,8 +1,126 @@
 ---
-title: Schemas
-description: Documentación sobre Schemas
+title: Schemas JSON:API
+description: Schemas base, schemas de auth y convenciones para crear nuevos
 ---
 
-# Schemas
+Los schemas son modelos Pydantic que definen el formato de entrada y salida
+de la API según el estándar JSON:API.
 
-Contenido en desarrollo para Schemas.
+## Schemas base
+
+Archivo: `src/app/presentation/api/v1/schemas/jsonapi_base.py`
+
+Contiene los componentes genéricos que se reusan en todos los recursos:
+
+```python
+class ResourceIdentifier(BaseModel):
+    type: str
+    id: str
+
+
+class LinksObject(BaseModel):
+    self: Optional[str] = None
+    related: Optional[str] = None
+
+
+class ErrorObject(BaseModel):
+    id: Optional[str] = None
+    links: Optional[LinksObject] = None
+    status: Optional[str] = None
+    code: Optional[str] = None
+    title: Optional[str] = None
+    detail: Optional[str] = None
+    source: Optional[ErrorSource] = None
+    meta: Optional[dict[str, Any]] = None
+
+
+class JsonApiErrorDocument(BaseModel):
+    errors: list[ErrorObject]
+    meta: Optional[dict[str, Any]] = None
+```
+
+| Schema | Propósito |
+|---|---|
+| `ResourceIdentifier` | Identificador `{type, id}` para relaciones |
+| `LinksObject` | Enlaces HATEOAS (`self`, `related`) |
+| `ErrorObject` | Error individual con `status`, `code`, `title`, `detail`, `source` |
+| `JsonApiErrorDocument` | Documento de error: `{ errors: [...] }` |
+
+## Schemas de auth
+
+Archivo: `src/app/presentation/api/v1/schemas/auth.py`
+
+Siguen una estructura de tres niveles para cada recurso:
+
+```python
+# 1. Atributos del recurso
+class UserAttributes(BaseModel):
+    email: str
+    is_active: bool
+    created_at: datetime
+    updated_at: datetime
+
+
+# 2. Recurso (data)
+class UserResource(BaseModel):
+    type: str = "users"
+    id: str
+    attributes: UserAttributes
+    links: Optional[LinksObject] = None
+
+
+# 3. Documento (envoltura)
+class UserDocument(BaseModel):
+    data: UserResource
+    links: Optional[LinksObject] = None
+    meta: Optional[dict[str, Any]] = None
+```
+
+Para las solicitudes (requests) el patrón es similar, pero sin `id` porque
+el servidor lo genera:
+
+```python
+class RegisterAttributes(BaseModel):
+    email: str
+    password: str
+
+
+class RegisterResource(BaseModel):
+    type: str = "users"
+    attributes: RegisterAttributes
+
+
+class RegisterRequest(BaseModel):
+    data: RegisterResource
+```
+
+## Patrón general
+
+Cada recurso sigue siempre la misma estructura:
+
+```
+Documento (response):      Solicitud (request):
+{                          {
+  "data": {                  "data": {
+    "type": "users",           "type": "users",
+    "id": "uuid",              "attributes": { ... }
+    "attributes": { ... }    }
+  }                         }
+}
+```
+
+La diferencia es que en las respuestas el recurso tiene `id`, mientras que
+en las solicitudes de creación el `id` no se envía (lo genera el servidor).
+
+## Cómo crear schemas nuevos
+
+1. Define los `Attributes` con los campos del recurso.
+2. Define el `Resource` con `type`, `id` (si aplica) y `attributes`.
+3. Define el `Document` con `data`.
+4. Si es una solicitud, define el `Request` con `data.resource`.
+5. Reusa `LinksObject` y `ResourceIdentifier` de `jsonapi_base.py`.
+
+## Próximos pasos
+
+Los [Manejadores de excepciones](./exception-handlers) usan `ErrorObject` y
+`JsonApiErrorDocument` para devolver errores en formato JSON:API.

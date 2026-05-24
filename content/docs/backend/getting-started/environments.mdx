@@ -1,8 +1,113 @@
 ---
-title: Environments
-description: Documentación sobre Environments
+title: Entornos
+description: Entornos de desarrollo y producción, variables requeridas y pruebas de humo.
 ---
 
-# Environments
+GEMA Backend está diseñado para ejecutarse en dos entornos: desarrollo y producción. La variable de entorno `APP_ENV` controla cómo se comporta la aplicación en cada caso.
 
-Contenido en desarrollo para Environments.
+## Desarrollo
+
+En el entorno de desarrollo (`APP_ENV=development`), la aplicación inicia con Uvicorn en modo `--reload`. Esto significa que el servidor se reinicia de forma automática cada vez que detecta cambios en el código fuente.
+
+Si activas `APP_DEBUG=true`, verás los logs formateados y coloreados en la consola, además de todas las consultas SQL completas que genere SQLAlchemy.
+
+Por defecto, la base de datos y la caché utilizan los nombres de servicio de Docker (`db` y `redis`). Si prefieres ejecutar la aplicación en tu máquina local fuera de Docker, crea un archivo `.env.local` que apunte a `localhost`:
+
+```bash
+DATABASE_URL=postgresql+asyncpg://sigma:sigma@localhost:5432/sigma_db
+REDIS_URL=redis://localhost:6379/0
+```
+
+> [!TIP]
+> No utilices `.env` o `.env.local` dentro del contenedor. Docker resuelve los servicios `db` y `redis` a través de su propia red. Usa estos archivos de configuración únicamente cuando ejecutes `uvicorn` o `alembic` de forma directa en tu terminal.
+
+## Producción
+
+En el entorno de producción (`APP_ENV=production`), la aplicación se ejecuta mediante Gunicorn utilizando cuatro workers de Uvicorn para aprovechar al máximo los núcleos del procesador. Además, los logs se estructuran en formato JSON para facilitar su integración con sistemas de monitoreo y observabilidad.
+
+Antes de realizar un despliegue, verifica los siguientes puntos:
+
+- **Clave secreta segura:** `JWT_SECRET_KEY` debe tener al menos 32 caracteres y ser distinta a la clave utilizada en desarrollo. La aplicación no iniciará si no cumple este requisito de seguridad.
+- **Depuración desactivada:** Define `APP_DEBUG=false` para evitar que las consultas SQL se expongan en los logs de producción.
+- **Servicios externos:** Asegúrate de que `DATABASE_URL` y `REDIS_URL` apunten a los servidores reales de producción, no a los contenedores locales.
+
+Para construir y arrancar la imagen de producción, ejecuta:
+
+```bash
+docker build --target production -t sigma-backend:latest .
+docker run --env-file .env.prod -p 8000:8000 sigma-backend:latest
+```
+
+## Pruebas de humo
+
+Antes de dar por terminado el despliegue, te recomendamos realizar una prueba de humo (*smoke test*) para comprobar que los endpoints de autenticación funcionan correctamente.
+
+> [!NOTE]
+> Una prueba de humo es una verificación rápida que confirma que las funciones básicas y críticas de la aplicación responden de forma correcta tras un cambio o despliegue.
+
+Una vez que el entorno esté activo, puedes verificar el flujo de autenticación ejecutando los siguientes comandos en tu terminal. Te recomendamos guardar los tokens en variables para facilitar las pruebas.
+
+### 1. Registrar un usuario
+
+Envía una petición `POST` para crear una nueva cuenta:
+
+```bash
+curl -s -X POST http://localhost:8000/v1/auth/register \
+  -H "Content-Type: application/vnd.api+json" \
+  -d '{"data":{"type":"users","attributes":{"email":"dev@sigma.com","password":"Test1234!"}}}'
+```
+
+### 2. Iniciar sesión
+
+Obtén los tokens de acceso y de refresco y guárdalos en variables:
+
+```bash
+# Iniciar sesión y guardar el token de acceso
+ACCESS=$(curl -s -X POST http://localhost:8000/v1/auth/login \
+  -H "Content-Type: application/vnd.api+json" \
+  -d '{"data":{"type":"tokens","attributes":{"email":"dev@sigma.com","password":"Test1234!"}}}' \
+  | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['data']['attributes']['access_token'])")
+
+# Guardar el token de refresco
+REFRESH=$(curl -s -X POST http://localhost:8000/v1/auth/login \
+  -H "Content-Type: application/vnd.api+json" \
+  -d '{"data":{"type":"tokens","attributes":{"email":"dev@sigma.com","password":"Test1234!"}}}' \
+  | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['data']['attributes']['refresh_token'])")
+```
+
+### 3. Consultar el perfil
+
+Envía el token de acceso en la cabecera `Authorization` para obtener tus datos de usuario:
+
+```bash
+curl -s http://localhost:8000/v1/auth/me \
+  -H "Authorization: Bearer $ACCESS"
+```
+
+### 4. Refrescar el token
+
+Utiliza el token de refresco para obtener un nuevo token de acceso:
+
+```bash
+curl -s -X POST http://localhost:8000/v1/auth/refresh \
+  -H "Content-Type: application/vnd.api+json" \
+  -d "{\"data\":{\"type\":\"tokens\",\"attributes\":{\"refresh_token\":\"$REFRESH\"}}}"
+```
+
+### 5. Cerrar sesión
+
+Invalida el token activo en el sistema. El servidor responderá con un código `204 No Content`:
+
+```bash
+curl -s -X POST http://localhost:8000/v1/auth/logout \
+  -H "Content-Type: application/vnd.api+json" \
+  -H "Authorization: Bearer $ACCESS"
+```
+
+## Próximos pasos
+
+| Si quieres... | Sigue esta guía |
+|---------------|-----------------|
+| Personalizar las variables del sistema | [Configuración](./configuration) |
+| Conocer la organización del código | [Estructura de directorios](./directory-structure) |
+| Conocer las convenciones de desarrollo | [Guía de estilo](./style-guide) |

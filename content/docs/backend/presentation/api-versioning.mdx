@@ -1,8 +1,89 @@
 ---
-title: Api Versioning
-description: Documentación sobre Api Versioning
+title: Versionado de API
+description: Estrategia de versionado por prefijo de URL (/v1, /v2)
 ---
 
-# Api Versioning
+La API usa versionado por **prefijo de URL**. Cada versión tiene su propio
+directorio bajo `presentation/api/`.
 
-Contenido en desarrollo para Api Versioning.
+## Estrategia
+
+```
+URL:  /v1/auth/register
+       ↑
+       Prefijo de versión
+```
+
+Ventajas de esta estrategia frente a headers (`Accept: version=v1`):
+
+- Las rutas son visibles y predecibles desde cualquier cliente.
+- Los tests y la documentación son más simples.
+- No requiere negociación de contenido.
+- Las versiones pueden convivir sin conflictos.
+
+## Implementación actual
+
+En `src/app/presentation/api/v1/router.py`:
+
+```python
+v1_router = APIRouter(prefix="/v1")
+v1_router.include_router(auth_router, prefix="/auth", tags=["auth"])
+```
+
+Todas las rutas de la versión 1 quedan bajo `/v1/`.
+
+## Cómo agregar una versión nueva
+
+Para crear `v2`, se duplica la estructura:
+
+```
+presentation/api/
+├── v1/
+│   ├── endpoints/
+│   ├── schemas/
+│   └── router.py
+└── v2/
+    ├── endpoints/
+    ├── schemas/
+    └── router.py
+```
+
+Y se registra en `main.py` junto a `v1`:
+
+```python
+from app.presentation.api.v1.router import v1_router
+from app.presentation.api.v2.router import v2_router
+
+app.include_router(v1_router)
+app.include_router(v2_router)
+```
+
+Ambas versiones conviven en el mismo servidor. Los clientes eligen cuál
+usar según el prefijo de la URL.
+
+## Cuándo versionar
+
+Crea una versión nueva solo cuando introduces un **cambio que rompe la
+compatibilidad hacia atrás**:
+
+- Renombrar o eliminar un campo en una respuesta.
+- Cambiar el tipo de un campo (ej: `id` de int a string).
+- Eliminar un endpoint.
+- Cambiar la semántica de un endpoint.
+
+No crees una versión nueva por:
+
+- Agregar un campo nuevo a una respuesta (los clientes deben ignorar
+  campos desconocidos).
+- Agregar un endpoint nuevo.
+- Correcciones de errores que no cambian el contrato.
+
+> [!TIP]
+> Si puedes hacer el cambio sin romper a los clientes existentes, no
+> versiones. Los clientes bien implementados ignoran campos que no
+> entienden. Aprovecha esa flexibilidad antes de crear una v2.
+
+## Próximos pasos
+
+La guía [Crear un nuevo endpoint API](../workflows/create-api-endpoint)
+te muestra paso a paso cómo agregar rutas dentro de la versión actual.

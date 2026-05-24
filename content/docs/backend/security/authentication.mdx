@@ -1,8 +1,248 @@
 ---
-title: Authentication
-description: Documentación sobre Authentication
+title: Autenticación
+description: Implementación de autenticación JWT con PyJWT, hashing de contraseñas con bcrypt y revocación de tokens mediante Redis blocklist. Flujo hexagonal desde los value objects de dominio hasta los adaptadores de infraestructura.
 ---
 
-# Authentication
+# Autenticación
 
-Contenido en desarrollo para Authentication.
+La autenticación en GEMA sigue el patrón de la arquitectura hexagonal: los
+puertos (`TokenServicePort`, `PasswordHasherPort`) viven en la capa de
+aplicación y los adaptadores (`PyJwtTokenService`, `BcryptPasswordHasher`) en
+la capa de infraestructura. El dominio valida las contraseñas en texto plano
+antes de que lleguen al hasher.
+
+## Flujo de registro
+
+Cuando un usuario se registra, los datos pasan por varias capas de validación:
+
+1. El schema de presentación (`RegisterRequest`) recibe `email` y `password`.
+2. El caso de uso (`RegisterUserUseCase`) convierte el DTO de entrada en value
+   objects del dominio.
+3. `PlainPassword` valida la fortaleza de la contraseña en su `__post_init__`.
+   Si falla, lanza `WeakPasswordError` que el exception handler traduce a 422.
+4. `BcryptPasswordHasher.hash()` genera el hash.
+5. Se crea la entidad `User` con `HashedPassword`.
+6. El repositorio persiste el usuario dentro de una transacción del Unit of
+   Work.
+7. Se emiten los tokens JWT.
+
+```
+str (request) → PlainPassword (valida) → hasher.hash() → HashedPassword
+```
+
+## Hashing de contraseñas
+
+La clase `BcryptPasswordHasher` (en
+`src/app/infrastructure/security/hashing.py`) implementa `PasswordHasherPort`
+usando la librería `bcrypt` directamente, sin envoltorios como `passlib` (que
+está abandonada).
+
+```python
+class BcryptPasswordHasher(PasswordHasherPort):
+    def hash(self, password: str) -> str:
+        password_bytes = password.encode("utf-8")
+        salt = bcrypt.gensalt()
+        hashed_bytes = bcrypt.hashpw(password_bytes, salt)
+        return hashed_bytes.decode("utf-8")
+
+    def verify(self, password: str, hashed_password: str) -> bool:
+        password_bytes = password.encode("utf-8")
+        hashed_bytes = hashed_password.encode("utf-8")
+        try:
+            return bcrypt.checkpw(password_bytes, hashed_bytes)
+        except ValueError:
+            return False
+```
+
+> [!NOTE]
+> Siempre codifica las contraseñas a bytes con `.encode("utf-8")` antes de
+> pasarlas a `bcrypt`. La librería trabaja exclusivamente con bytes.
+
+### Reglas de fortaleza de contraseña
+
+El value object `PlainPassword` en `src/app/domain/value_objects.py` valida:
+
+- Mínimo 8 caracteres
+- Al menos una letra mayúscula
+- Al menos un número
+- Al menos un carácter especial (`!@#$%^&*(),.?":{}|<>-_`)
+
+```python
+@dataclass(frozen=True)
+class PlainPassword:
+    value: str
+
+    def __post_init__(self) -> None:
+        if not self.value or len(self.value) < 8:
+            raise WeakPasswordError(
+                "La contraseña debe tener al menos 8 caracteres."
+            )
+        if not re.search(r"[A-Z]", self.value):
+            raise WeakPasswordError(
+                "La contraseña debe contener al menos una letra mayúscula."
+            )
+        if not re.search(r"\d", self.value):
+            raise WeakPasswordError(
+                "La contraseña debe contener al menos un número."
+            )
+        if not re.search(r"[!@#$%^&*(),.?\":{}|<>\-_]", self.value):
+            raise WeakPasswordError(
+                "La contraseña debe contener al menos un carácter especial."
+            )
+```
+
+Si falla la validación, el dominio lanza `WeakPasswordError` y el exception
+handler devuelve un error 422 con `source.pointer` apuntando a
+`/data/attributes/password`.
+
+## Tokens JWT
+
+La clase `PyJwtTokenService` (en `src/app/infrastructure/security/jwt.py`)
+implementa `TokenServicePort` usando la librería PyJWT con el algoritmo HS256.
+
+### Claims de los tokens
+
+Cada token JWT contiene estos claims:
+
+| Claim | Descripción | Access | Refresh |
+|---|---|---|---|
+| `sub` | Identificador del usuario (UUID como string) | ✓ | ✓ |
+| `jti` | Identificador único del token (UUID v4) | ✓ | ✓ |
+| `type` | Tipo de token: `access` o `refresh` | ✓ | ✓ |
+| `exp` | Fecha de expiración (timestamp UNIX) | ✓ | ✓ |
+| `iat` | Fecha de emisión (timestamp UNIX) | ✓ | ✓ |
+
+```python
+async def generate_access_token(self, subject: str) -> str:
+    now = datetime.now(timezone.utc)
+    expire = now + timedelta(
+        minutes=settings.JWT_ACCESS_TOKEN_EXPIRE_MINUTES
+    )
+    payload = {
+        "sub": subject,
+        "jti": str(uuid.uuid4()),
+        "type": "access",
+        "exp": int(expire.timestamp()),
+        "iat": int(now.timestamp()),
+    }
+    return jwt.encode(
+        payload, settings.JWT_SECRET_KEY,
+        algorithm=settings.JWT_ALGORITHM
+    )
+```
+
+### Duración de los tokens
+
+| Token | Duración por defecto | Configurable en `.env` |
+|---|---|---|
+| Access | 30 minutos | `JWT_ACCESS_TOKEN_EXPIRE_MINUTES` |
+| Refresh | 7 días | `JWT_REFRESH_TOKEN_EXPIRE_DAYS` |
+
+### Decodificación y validación
+
+El método `decode_token` valida que el token tenga los claims obligatorios
+(`exp`, `sub`, `jti`) y verifica que no esté revocado en Redis:
+
+```python
+async def decode_token(self, token: str) -> dict[str, Any]:
+    try:
+        claims = jwt.decode(
+            token,
+            settings.JWT_SECRET_KEY,
+            algorithms=[settings.JWT_ALGORITHM],
+            options={"require": ["exp", "sub", "jti"]},
+        )
+    except jwt.ExpiredSignatureError:
+        raise InvalidTokenError("El token ha expirado.")
+    except jwt.InvalidTokenError:
+        raise InvalidTokenError("Token JWT inválido.")
+
+    jti = claims["jti"]
+    is_revoked = await self.redis.get(f"blocklist:{jti}")
+    if is_revoked:
+        raise InvalidTokenError("El token ha sido revocado.")
+
+    return claims
+```
+
+> [!IMPORTANT]
+> Siempre usa `options={"require": [...]}` para exigir los claims mínimos.
+> Sin esta opción, PyJWT no valida la presencia de `exp`, `sub` o `jti`.
+
+## Revocación de tokens (Redis blocklist)
+
+Los tokens revocados se almacenan en Redis con una clave con el formato
+`blocklist:{jti}` y un TTL igual al tiempo de vida restante del token:
+
+```python
+async def revoke_token(self, jti: str, exp: int) -> None:
+    now = int(datetime.now(timezone.utc).timestamp())
+    ttl = exp - now
+    if ttl > 0:
+        await self.redis.set(f"blocklist:{jti}", "revoked", ex=ttl)
+```
+
+> [!WARNING]
+> El TTL es obligatorio. Si no estableces un TTL, la blocklist crece
+> indefinidamente y consume toda la memoria de Redis.
+
+### ¿Cuándo se revocan tokens?
+
+- **Al cerrar sesión** (`POST /v1/auth/logout`): se revoca el JTI del token de
+  acceso.
+- **Al refrescar tokens** (`POST /v1/auth/refresh`): se revoca el JTI del
+  token de refresco anterior y se emite uno nuevo (rotación).
+
+## Rotación de tokens de refresco
+
+Cada vez que un cliente refresca sus tokens, el caso de uso
+`RefreshTokenUseCase` sigue estos pasos:
+
+1. Decodifica el refresh token y verifica que `type` sea `"refresh"`.
+2. Revoca el JTI del refresh token anterior en Redis.
+3. Verifica que el usuario exista y esté activo.
+4. Genera un nuevo par access + refresh.
+5. Devuelve los tokens nuevos.
+
+Sin rotación, un token de refresco comprometido se puede reutilizar
+indefinidamente.
+
+## Subject de los tokens
+
+El `sub` de los tokens JWT siempre es un `UserId` convertido a string. El
+value object `UserId` expone un método `__str__()` que devuelve el UUID como
+string y un classmethod `from_string()` que lo reconstruye:
+
+```python
+@dataclass(frozen=True)
+class UserId:
+    value: uuid.UUID
+
+    def __str__(self) -> str:
+        return str(self.value)
+
+    @classmethod
+    def from_string(cls, user_id_str: str) -> "UserId":
+        try:
+            return cls(value=uuid.UUID(user_id_str))
+        except ValueError:
+            raise ValueError(
+                f"El identificador '{user_id_str}' no es un UUID válido."
+            )
+```
+
+## Mapa de excepciones a códigos HTTP
+
+| Excepción | Código HTTP | Código de error |
+|---|---|---|
+| `InvalidTokenError` | 401 | `ERR_INVALID_TOKEN` |
+| `InvalidCredentialsError` | 401 | `ERR_INVALID_CREDENTIALS` |
+| `WeakPasswordError` | 422 | `ERR_WEAK_PASSWORD` |
+| `InvalidEmailError` | 422 | `ERR_INVALID_EMAIL` |
+
+## Próximos pasos
+
+- Revisa cómo se protegen los endpoints en
+  [Autorización](./authorization).
+- Consulta el listado completo de medidas de seguridad en
+  [OWASP](./owasp).

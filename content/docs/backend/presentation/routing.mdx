@@ -1,8 +1,79 @@
 ---
-title: Routing
-description: Documentación sobre Routing
+title: Enrutamiento
+description: Router v1, routers anidados y registro en main.py
 ---
 
-# Routing
+Esta página explica cómo se organizan las rutas de la API, cómo se agrupan
+por módulos y cómo se registran en la aplicación.
 
-Contenido en desarrollo para Routing.
+## Router v1
+
+Archivo: `src/app/presentation/api/v1/router.py`
+
+```python
+from fastapi import APIRouter
+from app.presentation.api.v1.endpoints.auth import router as auth_router
+
+
+v1_router = APIRouter(prefix="/v1")
+v1_router.include_router(auth_router, prefix="/auth", tags=["auth"])
+```
+
+El `v1_router` usa `prefix="/v1"` para que todas las rutas dentro de él
+comiencen con `/v1`. Luego `include_router` monta cada módulo con su
+propio prefijo:
+
+- `auth_router` montado en `/auth` → rutas quedan como `/v1/auth/register`,
+  `/v1/auth/login`, etc.
+
+## Registro en `main.py`
+
+Archivo: `src/app/main.py`
+
+```python
+from app.presentation.api.v1.endpoints.health import router as health_router
+from app.presentation.api.v1.router import v1_router
+from app.presentation.exception_handlers import register_exception_handlers
+from app.presentation.middlewares.accept import AcceptMiddleware
+from app.presentation.middlewares.content_type import ContentTypeMiddleware
+from app.presentation.middlewares.rate_limit import RateLimitMiddleware
+from app.presentation.middlewares.request_id import RequestIdMiddleware
+
+
+app = FastAPI(title=settings.APP_TITLE, version=settings.APP_VERSION, lifespan=lifespan)
+
+register_exception_handlers(app)
+
+# El último middleware registrado se ejecuta primero
+app.add_middleware(RateLimitMiddleware)
+app.add_middleware(AcceptMiddleware)
+app.add_middleware(ContentTypeMiddleware)
+app.add_middleware(RequestIdMiddleware)
+
+app.include_router(health_router)
+app.include_router(v1_router)
+```
+
+> [!TIP]
+> El orden de `add_middleware()` es inverso al de ejecución. El último
+> registrado se ejecuta primero. Aquí el orden real es: RateLimit → Accept
+> → ContentType → RequestId.
+
+## Cómo agregar una ruta nueva
+
+1. Crea o modifica el archivo en `presentation/api/v1/endpoints/`.
+2. Si es un módulo nuevo, agrega `include_router` en `router.py`.
+3. El endpoint ya queda disponible bajo el prefijo `/v1`.
+
+Por ejemplo, un router nuevo `profile` se registra así:
+
+```python
+v1_router.include_router(profile_router, prefix="/profile", tags=["profile"])
+```
+
+Y queda accesible como `/v1/profile/...`.
+
+## Próximos pasos
+
+El [Versionado de API](./api-versioning) explica cómo convivirían varias
+versiones de la API y cuándo crear una nueva.

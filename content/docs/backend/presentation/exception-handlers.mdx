@@ -1,8 +1,92 @@
 ---
-title: Exception Handlers
-description: Documentación sobre Exception Handlers
+title: Manejadores de excepciones
+description: Traducción de excepciones de dominio, validación y HTTP al formato JSON API
 ---
 
-# Exception Handlers
+Todos los errores de la API se devuelven en formato JSON:API. Los
+manejadores de excepciones se encargan de traducir cada tipo de error a
+la respuesta HTTP correspondiente.
 
-Contenido en desarrollo para Exception Handlers.
+Archivo: `src/app/presentation/exception_handlers.py`
+
+## Helper `jsonapi_response()`
+
+Todas las respuestas de error se construyen con esta función:
+
+```python
+def jsonapi_response(
+    status_code: int,
+    errors: list[ErrorObject],
+    headers: Optional[dict[str, str]] = None,
+) -> JSONResponse:
+    doc = JsonApiErrorDocument(errors=errors)
+    return JSONResponse(
+        status_code=status_code,
+        content=doc.model_dump(exclude_none=True),
+        headers={"Content-Type": "application/vnd.api+json", **(headers or {})},
+    )
+```
+
+Fija automáticamente `Content-Type: application/vnd.api+json` y serializa
+el documento de error excluyendo campos `null`.
+
+## Manejadores registrados
+
+### 1. `domain_exception_handler`
+
+Traduce excepciones del dominio a códigos HTTP:
+
+| Excepción | HTTP | Código interno |
+|---|---|---|
+| `WeakPasswordError` | 422 | `ERR_WEAK_PASSWORD` |
+| `InvalidEmailError` | 422 | `ERR_INVALID_EMAIL` |
+| `UserAlreadyExistsError` | 409 | `ERR_USER_ALREADY_EXISTS` |
+| `InvalidCredentialsError` | 401 | `ERR_INVALID_CREDENTIALS` |
+| `UserInactiveError` | 403 | `ERR_USER_INACTIVE` |
+| `InvalidTokenError` | 401 | `ERR_INVALID_TOKEN` |
+
+Cada error incluye su `status`, `code`, `title` (nombre de la clase) y
+`detail` (mensaje original).
+
+### 2. `request_validation_exception_handler`
+
+Traduce errores de validación de Pydantic (schemas de entrada) a 422 con
+JSON Pointer en `source.pointer`:
+
+```json
+{
+  "errors": [{
+    "status": "422",
+    "code": "ERR_VALIDATION",
+    "title": "Error de validación en la solicitud",
+    "detail": "Field required",
+    "source": { "pointer": "/data/attributes/email" }
+  }]
+}
+```
+
+### 3. `starlette_http_exception_handler`
+
+Captura cualquier `HTTPException` de Starlette/FastAPI que no haya sido
+capturada antes y la envuelve en JSON:API.
+
+## Registro
+
+```python
+def register_exception_handlers(app: FastAPI) -> None:
+    app.add_exception_handler(DomainException, domain_exception_handler)
+    app.add_exception_handler(RequestValidationError, request_validation_exception_handler)
+    app.add_exception_handler(StarletteHTTPException, starlette_http_exception_handler)
+```
+
+Se llama en `main.py` antes de registrar middlewares y routers.
+
+> [!TIP]
+> Si agregas una nueva excepción de dominio, solo necesitas añadir un
+> `elif` dentro de `domain_exception_handler()` con su código HTTP y
+> código interno. No necesitas crear un handler nuevo.
+
+## Próximos pasos
+
+Los [Middlewares](./middlewares) se ejecutan antes que los exception
+handlers y pueden rechazar peticiones antes de que lleguen a los endpoints.

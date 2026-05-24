@@ -1,8 +1,238 @@
 ---
-title: Style Guide
-description: Documentación sobre Style Guide
+title: Guía de estilo
+description: Convenciones de código, herramientas de análisis y formato de commits
 ---
 
-# Style Guide
+Esta guía establece las herramientas de análisis estático, las convenciones de estilo de código y las normas de control de versiones que garantizan la calidad y consistencia del código base de GEMA Backend.
 
-Contenido en desarrollo para Style Guide.
+Todo el código que se añade al proyecto pasa por un proceso de verificación automática de formato y tipos antes de ser integrado.
+
+## Herramientas de desarrollo
+
+El proyecto automatiza el análisis y formateo del código a través de herramientas estándar del ecosistema Python. Te recomendamos configurar estas herramientas en tu editor para recibir comentarios en tiempo real.
+
+- **Ruff** ([docs.astral.sh/ruff](https://docs.astral.sh/ruff/)): Se utiliza como linter y organizador de importaciones. Reemplaza de forma eficiente a herramientas tradicionales como Flake8, isort y diversos plugins de análisis estático en una fracción de segundo.
+- **Black** ([black.readthedocs.io](https://black.readthedocs.io/)): Es el formateador de código oficial del proyecto. Aplica un estilo consistente con un ancho de línea fijado en `100` caracteres.
+- **mypy** ([mypy-lang.org](https://mypy-lang.org/)): Ejecuta la verificación estricta de tipos de Python, asegurando que todo el código nuevo cuente con anotaciones completas y correctas.
+
+### Comandos de validación manual
+
+Puedes ejecutar las verificaciones de forma manual desde tu terminal utilizando los siguientes comandos dentro del contenedor:
+
+```bash
+# Ejecutar el linter y el comprobador de tipos
+docker compose exec app ruff check src/
+docker compose exec app mypy src/
+
+# Comprobar si el formato cumple con Black
+docker compose exec app black --check src/
+```
+
+### Aplicación automática de formato
+
+Para aplicar las correcciones de estilo y formato de manera automática, ejecuta:
+
+```bash
+docker compose exec app black src/
+docker compose exec app ruff check --fix src/
+```
+
+## Convenciones de código
+
+El desarrollo de GEMA Backend sigue una serie de pautas que combinan las convenciones de la [guía de estilo de Google](https://google.github.io/styleguide/pyguide.html) con las mejores prácticas de tipado y diseño modular.
+
+### Tipado y anotaciones
+
+Todo el código nuevo debe estar completamente tipado. Esto ayuda a detectar errores en el tiempo de compilación y facilita el mantenimiento.
+
+```python
+# Correcto:
+def register_user(email: str, password: str) -> UserDto:
+    # Tipos claros en argumentos y retorno
+    return UserDto(email=email)
+
+def get_roles() -> list[str]:
+    # Uso de tipos nativos modernos (list en vez de typing.List)
+    return ["admin", "member"]
+```
+
+```python
+# Incorrecto:
+def register_user(email, password):
+    # Falta tipado en argumentos y retorno
+    return {"email": email}
+
+def get_roles() -> List[str]:
+    # Evita importar List del módulo typing en Python 3.9+
+    return ["admin", "member"]
+```
+
+### Nombres y nomenclatura
+
+El proyecto utiliza nombres descriptivos y consistentes que reflejan el propósito de cada elemento de código:
+
+```python
+# Correcto:
+class UserRepository:
+    # Nombres de clase en PascalCase
+    
+    def get_user_by_id(self, user_id: UserId) -> User | None:
+        # Métodos y argumentos en snake_case
+        pass
+
+_MAX_LOGIN_ATTEMPTS = 5
+# Constantes privadas con guion bajo inicial y UPPER_CASE
+```
+
+```python
+# Incorrecto:
+class user_repository:
+    # Evita snake_case en nombres de clases
+    
+    def GetUser(self, UserId):
+        # Evita camelCase o PascalCase en métodos y argumentos
+        pass
+
+maxLoginAttempts = 5
+# Evita camelCase para constantes o variables de configuración
+```
+
+### Estilo de importaciones
+
+Las importaciones de módulos deben ser explícitamente detalladas y ordenadas. Ruff organiza automáticamente las importaciones en tres bloques separados por una línea en blanco:
+
+```python
+# Correcto:
+# 1. Biblioteca estándar
+import os
+import sys
+from typing import Protocol
+
+# 2. Librerías de terceros
+from fastapi import APIRouter
+from pydantic import BaseModel
+
+# 3. Módulos locales del proyecto (importaciones absolutas)
+from src.app.domain.entities import User
+from src.app.domain.value_objects import Email
+```
+
+```python
+# Incorrecto:
+import os
+from fastapi import APIRouter
+from ..entities import User
+# Evita mezclar bloques y usar importaciones relativas
+```
+
+### Manejo de excepciones
+
+Las excepciones deben representar situaciones excepcionales y no utilizarse para controlar el flujo normal de la aplicación:
+
+```python
+# Correcto:
+try:
+    user = repository.get_by_id(user_id)
+except UserNotFoundError as error:
+    # Captura específica de excepciones esperadas
+    logger.warning("Usuario no encontrado", error=error)
+```
+
+```python
+# Incorrecto:
+try:
+    user = repository.get_by_id(user_id)
+except Exception:
+    # Evita capturar Exception de forma genérica sin relanzarla o tratarla
+    pass
+
+try:
+    user = repository.get_by_id(user_id)
+except:
+    # Jamás uses bloques except vacíos ya que atrapan interrupciones del sistema
+    pass
+```
+
+### Argumentos con valores por defecto
+
+Por seguridad y consistencia en el estado del objeto, nunca utilices contenedores mutables como valores por defecto en la definición de una función:
+
+```python
+# Correcto:
+def search_users(roles: list[str] | None = None) -> list[User]:
+    # Usa None por defecto e inicializa el contenedor mutable dentro
+    if roles is None:
+        roles = []
+    return []
+```
+
+```python
+# Incorrecto:
+def search_users(roles: list[str] = []) -> list[User]:
+    # Evita listas mutables por defecto; comparten estado entre invocaciones
+    return []
+```
+
+### Documentación y docstrings
+
+El proyecto sigue la estructura de documentación de la convención de Google.
+
+```python
+# Correcto:
+def hash_password(password: str, salt_rounds: int = 12) -> bytes:
+    """Genera un hash seguro utilizando el algoritmo bcrypt.
+
+    Args:
+        password: La contraseña en texto plano que se va a procesar.
+        salt_rounds: El factor de costo para la generación del salt.
+
+    Returns:
+        El hash generado representado como una secuencia de bytes.
+
+    Raises:
+        ValueError: Si la contraseña está vacía o tiene un formato inválido.
+    """
+    if not password:
+        raise ValueError("La contraseña no puede estar vacía.")
+    return b"dummy_hash"
+```
+
+## Convenciones de commits
+
+El proyecto adopta el estándar de **Conventional Commits** para mantener un historial de cambios limpio y legible. Cada mensaje de commit debe seguir el formato `tipo(alcance): descripción en imperativo`.
+
+A continuación se presentan ejemplos de mensajes de commits bien estructurados:
+
+```
+feat(domain): add Email value object with format validation
+fix(security): correct bcrypt salt encoding to bytes
+refactor(presentation): restructure api_v1 to api/v1
+test(integration): add UserRepository tests with real database
+build(docker): add multi-stage Dockerfile for dev and production
+chore: update .env.example with Redis URL
+```
+
+### Tipos de commits permitidos
+
+El tipo de commit define la categoría del cambio introducido en el repositorio. Debes utilizar alguno de los siguientes valores:
+
+- **`feat`**: Implementación de una nueva funcionalidad.
+- **`fix`**: Corrección de un error en el código.
+- **`refactor`**: Cambios en el código que no añaden funcionalidades ni corrigen errores.
+- **`test`**: Creación o actualización de pruebas automatizadas.
+- **`build`**: Modificaciones en el sistema de construcción, dependencias o configuración de Docker.
+- **`docs`**: Cambios exclusivos en la documentación.
+- **`perf`**: Mejoras en el rendimiento del código.
+- **`chore`**: Tareas rutinarias de mantenimiento o actualización de configuraciones locales.
+
+El alcance (*scope*) is opcional, pero te recomendamos incluirlo para ayudar a identificar la capa o módulo afectado por el cambio (por ejemplo, `domain`, `infrastructure`, `presentation`).
+
+## Próximos pasos
+
+Una vez que conozcas las normas de desarrollo, puedes continuar con las siguientes lecturas:
+
+| Si quieres... | Sigue esta guía |
+|---------------|-----------------|
+| Levantar el proyecto de forma local | [Instalación](./installation) |
+| Comprender la organización de las carpetas | [Estructura de directorios](./directory-structure) |
+| Conocer las variables de entorno | [Configuración](./configuration) |

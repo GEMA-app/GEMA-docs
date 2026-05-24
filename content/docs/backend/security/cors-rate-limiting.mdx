@@ -1,8 +1,193 @@
 ---
-title: Cors Rate Limiting
-description: Documentación sobre Cors Rate Limiting
+title: CORS y rate limiting
+description: Configuración de CORS con FastAPI CORSMiddleware e implementación de rate limiting con script Lua atómico en Redis, incluyendo fail-open, límites por endpoint y manejo de proxies.
 ---
 
-# Cors Rate Limiting
+# CORS y rate limiting
 
-Contenido en desarrollo para Cors Rate Limiting.
+Esta página cubre dos mecanismos de seguridad a nivel de presentación: CORS
+(Cross-Origin Resource Sharing) y rate limiting (limitación de tasa). Ambos se
+configuran como middlewares de FastAPI.
+
+## CORS
+
+> [!NOTE]
+> La configuración de CORS aún no está implementada en `main.py`. Esta sección
+> describe cómo debe configurarse.
+
+FastAPI incluye `CORSMiddleware` para gestionar solicitudes entre orígenes
+distintos. Debes añadirlo en `main.py` antes que los demás middlewares:
+
+```python
+from fastapi.middleware.cors import CORSMiddleware
+
+origins = (
+    ["*"]
+    if settings.APP_ENV == "development"
+    else settings.ALLOWED_ORIGINS
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PATCH", "DELETE"],
+    allow_headers=["Content-Type", "Authorization", "X-Request-ID"],
+)
+```
+
+### Configuración recomendada por entorno
+
+| Entorno | Orígenes | Credenciales |
+|---|---|---|
+| Desarrollo | `["*"]` | No necesario |
+| Staging | Dominios específicos | Sí |
+| Producción | Dominios específicos | Sí |
+
+> [!WARNING]
+> En producción, nunca uses `allow_origins=["*"]` si usas
+> `allow_credentials=True`. El navegador lo rechazará.
+
+## Rate limiting
+
+El middleware `RateLimitMiddleware` (en
+`src/app/presentation/middlewares/rate_limit.py`) limita el número de
+solicitudes por minuto a ciertos endpoints usando Redis como backend.
+
+### Límites por endpoint
+
+| Endpoint | Límite | Ventana | Clave |
+|---|---|---|---|
+| `POST /v1/auth/login` | 5 solicitudes | 60 segundos | `rate_limit:/v1/auth/login:{ip}` |
+| `POST /v1/auth/register` | 3 solicitudes | 60 segundos | `rate_limit:/v1/auth/register:{ip}` |
+| `POST /v1/auth/refresh` | 10 solicitudes | 60 segundos | `rate_limit:/v1/auth/refresh:{ip}` |
+
+### Implementación con script Lua
+
+El middleware usa un script Lua atómico para evitar race conditions entre
+`INCR` y `EXPIRE`:
+
+```lua
+local current = redis.call('INCR', KEYS[1])
+if current == 1 then
+    redis.call('EXPIRE', KEYS[1], ARGV[1])
+end
+return current
+```
+
+El script se registra una vez al importar el módulo:
+
+```python
+rate_limit_script = redis_client.register_script(LUA_SCRIPT)
+```
+
+### Código del middleware
+
+```python
+class RateLimitMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next) -> Response:
+        path = request.url.path
+
+        limit = None
+        if path.endswith("/auth/login"):
+            limit = 5
+        elif path.endswith("/auth/register"):
+            limit = 3
+        elif path.endswith("/auth/refresh"):
+            limit = 10
+
+        if limit is not None:
+            client_ip = request.headers.get("X-Forwarded-For")
+            if client_ip:
+                client_ip = client_ip.split(",")[0].strip()
+            else:
+                client_ip = (
+                    request.client.host
+                    if request.client else "127.0.0.1"
+                )
+
+            key = f"rate_limit:{path}:{client_ip}"
+
+            try:
+                current = await rate_limit_script(
+                    keys=[key], args=[60]
+                )
+                if current > limit:
+                    error = ErrorObject(
+                        status=str(
+                            status.HTTP_429_TOO_MANY_REQUESTS
+                        ),
+                        code="ERR_TOO_MANY_REQUESTS",
+                        title="Demasiadas solicitudes",
+                        detail=(
+                            f"Has excedido el límite de "
+                            f"{limit} solicitudes por minuto."
+                        ),
+                    )
+                    return jsonapi_response(
+                        status.HTTP_429_TOO_MANY_REQUESTS, [error]
+                    )
+            except RedisError as e:
+                logger.error(
+                    "rate_limit_redis_unavailable: %s",
+                    e,
+                    extra={"path": path},
+                )
+
+        return await call_next(request)
+```
+
+### Fail-open
+
+Si Redis no responde (timeout, conexión rota), el middleware permite la
+solicitud y registra el error en los logs. Esto evita que una caída de Redis
+bloquee toda la API.
+
+```python
+except RedisError as e:
+    logger.error(
+        "rate_limit_redis_unavailable: %s",
+        e,
+        extra={"path": path},
+    )
+    # → continúa sin bloquear
+```
+
+### Manejo de proxies
+
+Para que el rate limiting funcione detrás de proxies (Nginx, Traefik, AWS
+ALB), el middleware extrae la IP real del header `X-Forwarded-For`:
+
+```python
+client_ip = request.headers.get("X-Forwarded-For")
+if client_ip:
+    client_ip = client_ip.split(",")[0].strip()
+else:
+    client_ip = (
+        request.client.host if request.client else "127.0.0.1"
+    )
+```
+
+Además, uvicorn debe ejecutarse con las opciones `--proxy-headers` y
+`--forwarded-allow-ips` para que `request.client.host` refleje la IP real.
+
+## Orden de los middlewares
+
+En `main.py`, los middlewares se registran en este orden (el último añadido se
+ejecuta primero):
+
+```
+RateLimitMiddleware  → 1º en ejecutarse
+AcceptMiddleware     → 2º
+ContentTypeMiddleware → 3º
+RequestIdMiddleware  → 4º
+```
+
+El rate limiting debe ejecutarse primero para descartar solicitudes
+excesivas antes de cualquier otro procesamiento.
+
+## Próximos pasos
+
+- Revisa el mapeo de seguridad contra [OWASP](./owasp).
+- Consulta los detalles de la autenticación JWT en
+  [Autenticación](./authentication).

@@ -1,8 +1,166 @@
 ---
-title: Owasp
-description: Documentación sobre Owasp
+title: OWASP
+description: Mapeo de las medidas de seguridad de GEMA contra el OWASP Top 10 2021. Checklist por capa arquitectónica y recomendaciones para producción.
 ---
 
-# Owasp
+# OWASP
 
-Contenido en desarrollo para Owasp.
+Esta página mapea las medidas de seguridad implementadas en GEMA contra los
+riesgos del [OWASP Top 10 2021](https://owasp.org/www-project-top-ten/).
+También incluye una checklist que puedes usar para auditar tu despliegue.
+
+## Mapeo OWASP Top 10 2021
+
+### A01: Broken Access Control
+
+El control de acceso recae en la capa de presentación (endpoints protegidos
+con `HTTPBearer`) y en los casos de uso (validación de tipo de token,
+verificación de usuario activo).
+
+**Medidas implementadas:**
+
+- Endpoints protegidos requieren token Bearer
+- Validación de tipo de token (access vs refresh)
+- Verificación de usuario activo (403 si está inactivo)
+- Ownership implícito: el JTI del token de acceso solo puede revocarse por
+  quien posee el token
+
+### A02: Cryptographic Failures
+
+**Medidas implementadas:**
+
+- Hashing de contraseñas con bcrypt (librería nativa, sin passlib).
+- Tokens JWT con algoritmo HS256.
+- `JWT_SECRET_KEY` validada en producción (mínimo 32 caracteres, no puede ser
+  el valor por defecto).
+- Las contraseñas viajan por HTTPS (requerido en producción) y se validan como
+  `PlainPassword` antes de hashear.
+
+### A03: Injection
+
+**Medidas implementadas:**
+
+- Todas las consultas a la base de datos usan SQLAlchemy ORM con queries
+  parametrizadas. No hay concatenación de strings SQL.
+- La validación de tipos ocurre en los value objects del dominio antes de
+  llegar al repositorio.
+
+### A04: Insecure Design
+
+**Medidas implementadas:**
+
+- Validación de datos en value objects (fail-fast): `Email`, `PlainPassword`,
+  `UserId` validan en el constructor.
+- Validación de fortaleza de contraseña en el dominio, no en la presentación.
+- Arquitectura hexagonal separa las responsabilidades: el dominio nunca sabe
+  cómo se persisten los datos.
+
+### A05: Security Misconfiguration
+
+**Medidas implementadas:**
+
+- `Settings` rechaza configuración desconocida con `extra="forbid"`.
+- `JWT_SECRET_KEY` no puede ser el valor por defecto en producción (validación
+  con `@field_validator`).
+- `STRICT_JSONAPI` obliga a usar `application/vnd.api+json` en los headers.
+
+**Pendiente para producción:**
+
+- Cabecera CORS configurada explícitamente (ver
+  [CORS y rate limiting](./cors-rate-limiting)).
+- Cabeceras de seguridad HTTP (HSTS, X-Content-Type-Options, CSP).
+
+### A07: Identification & Authentication Failures
+
+**Medidas implementadas:**
+
+- Tokens JWT con JTI único (UUID v4) para cada token emitido.
+- Blocklist en Redis con TTL automático (evita acumulación).
+- Rotación de refresh tokens: cada refresco revoca el anterior.
+- El logout revoca el token de acceso en la blocklist.
+- Rate limiting en endpoints críticos: login (5/min), register (3/min), refresh
+  (10/min).
+
+**Detalles en:**
+
+- [Autenticación](./authentication)
+- [Autorización](./authorization)
+- [CORS y rate limiting](./cors-rate-limiting)
+
+### A09: Security Logging & Monitoring
+
+**Medidas implementadas:**
+
+- Logging estructurado con structlog (JSON en producción).
+- Cada request tiene un `request_id` único que se adjunta a los logs.
+- Los fallos de Redis en rate limiting se registran con nivel `ERROR`.
+
+**Pendiente:**
+
+- Logging de eventos de seguridad (inicios de sesión fallidos, tokens
+  revocados, etc.).
+- Métricas de seguridad.
+
+### Tabla completa de mapeo
+
+| OWASP | Riesgo | Medida | Estado |
+|---|---|---|---|
+| A01 | Broken Access Control | HTTPBearer + tipo token + usuario activo | Implementado |
+| A02 | Cryptographic Failures | bcrypt + HS256 + validación secret key | Implementado |
+| A03 | Injection | SQLAlchemy ORM + value objects | Implementado |
+| A04 | Insecure Design | Validación en dominio + hexagonal | Implementado |
+| A05 | Security Misconfiguration | Settings strict + validación secret key | Implementado |
+| A06 | Vulnerable Components | Dependencias gestionadas con Poetry + lock file | Implementado |
+| A07 | ID & Auth Failures | JWT + JTI + blocklist + rotación + rate limit | Implementado |
+| A08 | Data Integrity Failures | No aplica (sin firmas ni serialización) | — |
+| A09 | Security Logging & Monitoring | structlog + request_id | Parcial |
+| A10 | Server-Side Request Forgery | No aplica (sin fetching externo) | — |
+
+## Checklist de seguridad por capa
+
+### Dominio
+
+- [ ] Los value objects validan en el constructor (fail-fast)
+- [ ] Las entidades mantienen invariantes (ej. `login()` valida `is_active`)
+- [ ] Las excepciones de dominio son específicas (no `Exception` genérica)
+- [ ] Las contraseñas débiles se rechazan antes de hashear
+
+### Aplicación
+
+- [ ] Los casos de uso verifican el estado del usuario
+- [ ] Los puertos definen contratos seguros (no aceptan datos sin validar)
+- [ ] El Unit of Work maneja rollback automático en caso de error
+
+### Infraestructura
+
+- [ ] `JWT_SECRET_KEY` tiene una validación en producción
+- [ ] Las queries usan SQLAlchemy ORM (no SQL crudo)
+- [ ] Redis blocklist tiene TTL (no crece indefinidamente)
+- [ ] bcrypt se usa directamente, sin passlib
+- [ ] Los tokens JWT tienen `options={"require": [...]}` para claims mínimos
+
+### Presentación
+
+- [ ] Los endpoints sensibles están protegidos con `HTTPBearer`
+- [ ] El rate limiting tiene fail-open (no bloquea toda la API si Redis falla)
+- [ ] Los middlewares validan Content-Type y Accept headers
+- [ ] Los mensajes de error no filtran información interna
+
+## Recomendaciones para producción
+
+Antes de desplegar a producción, revisa estos puntos:
+
+1. **Cambia `JWT_SECRET_KEY`** por un valor seguro (mínimo 256 bits).
+2. **Configura CORS** con una lista explícita de orígenes permitidos.
+3. **Habilita HTTPS** y configura HSTS.
+4. **Activa el logging de eventos de seguridad** (intentos fallidos de login,
+   registros, revocaciones).
+5. **Define un plan de rotación de secretos** para `JWT_SECRET_KEY`.
+6. **Monitorea el tamaño de la blocklist** en Redis.
+
+## Próximos pasos
+
+- Revisa la configuración de [CORS y rate limiting](./cors-rate-limiting) para
+  entender cómo se protegen los endpoints contra abusos.
+- Consulta [Autenticación](./authentication) para los detalles de JWT y
+  hashing.

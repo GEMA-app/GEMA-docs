@@ -1,8 +1,137 @@
 ---
 title: Middlewares
-description: Documentación sobre Middlewares
+description: Request ID, Content-Type, Accept y rate limiting, pipeline y orden de ejecución
 ---
 
-# Middlewares
+Los middlewares se ejecutan antes y después de cada petición. Pueden
+modificar la request, la response o interrumpir el flujo.
 
-Contenido en desarrollo para Middlewares.
+## Orden de ejecución
+
+Los middlewares se registran en `main.py` con `app.add_middleware()`. El
+**primero en registrarse** es el **más interno** (se ejecuta más cerca del
+endpoint). El **último en registrarse** es el **más externo** (recibe la
+petición primero).
+
+```python
+app.add_middleware(RateLimitMiddleware)     # 1º registrado → más interno
+app.add_middleware(AcceptMiddleware)         # 2º
+app.add_middleware(ContentTypeMiddleware)    # 3º
+app.add_middleware(RequestIdMiddleware)      # 4º registrado → más externo
+```
+
+Pipeline de ejecución (petición entrante):
+
+```
+RequestId → ContentType → Accept → RateLimit → Endpoint → RateLimit → Accept → ContentType → RequestId
+```
+
+> [!NOTE]
+> `BaseHTTPMiddleware` de Starlette envuelve cada petición. El código antes
+> de `call_next()` se ejecuta al entrar; después de `call_next()`, al salir.
+
+## `RequestIdMiddleware`
+
+Archivo: `src/app/presentation/middlewares/request_id.py`
+
+```python
+class RequestIdMiddleware(BaseHTTPMiddleware):
+
+    async def dispatch(self, request: Request, call_next) -> Response:
+        request_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
+        request.state.request_id = request_id
+        response = await call_next(request)
+        response.headers["X-Request-ID"] = request_id
+        return response
+```
+
+- Toma el `X-Request-ID` del header entrante (si el cliente lo envía) o
+  genera un UUID nuevo.
+- Lo adjunta a `request.state` para que los logs y handlers lo usen.
+- Lo devuelve en el header de respuesta.
+
+## `ContentTypeMiddleware`
+
+Archivo: `src/app/presentation/middlewares/content_type.py`
+
+Valida que las peticiones con body (`POST`, `PATCH`, `DELETE`) incluyan
+`Content-Type: application/vnd.api+json`.
+
+```python
+if settings.STRICT_JSONAPI:
+    if expected not in content_type and json_type not in content_type:
+        return jsonapi_response(415, [error])
+```
+
+- Si `STRICT_JSONAPI=true` (valor por defecto), solo acepta
+  `application/vnd.api+json`. También acepta `application/json`.
+- Si `STRICT_JSONAPI=false`, acepta ambos pero con mensaje menos restrictivo.
+- Las peticiones `GET` no llevan body, por lo que se saltan la validación.
+
+## `AcceptMiddleware`
+
+Archivo: `src/app/presentation/middlewares/accept.py`
+
+Valida que el cliente acepte `application/vnd.api+json`:
+
+```python
+if (
+    "application/vnd.api+json" not in accept
+    and "*/*" not in accept
+    and "application/json" not in accept
+):
+    return jsonapi_response(406, [error])
+```
+
+- Permite `*/*` y `application/json` como compatibles.
+- Si el cliente envía `Accept: text/html`, retorna 406.
+
+## `RateLimitMiddleware`
+
+Archivo: `src/app/presentation/middlewares/rate_limit.py`
+
+Límites de peticiones por endpoint usando un script Lua atómico en Redis:
+
+```python
+LUA_SCRIPT = """
+local current = redis.call('INCR', KEYS[1])
+if current == 1 then
+    redis.call('EXPIRE', KEYS[1], ARGV[1])
+end
+return current
+"""
+
+rate_limit_script = redis_client.register_script(LUA_SCRIPT)
+```
+
+| Endpoint | Límite por minuto |
+|---|---|
+| `POST /v1/auth/login` | 5 |
+| `POST /v1/auth/register` | 3 |
+| `POST /v1/auth/refresh` | 10 |
+
+- Usa `redis-client.host` (o `X-Forwarded-For` detrás de proxies) como
+  clave de rate limiting.
+- Si Redis falla, permite la petición (fail-open) y registra el error.
+
+> [!NOTE]
+> **Fail-open**: si Redis no responde, el middleware deja pasar la
+> petición y registra el error. Es preferible permitir más peticiones de
+> las debidas a bloquear toda la API.
+
+## Middlewares planeados
+
+Los siguientes archivos están creados pero vacíos, para implementación
+futura:
+
+| Middleware | Archivo | Propósito |
+|---|---|---|
+| `CorrelationMiddleware` | `middlewares/correlation.py` | Correlación entre servicios |
+| `LoggingMiddleware` | `middlewares/logging.py` | Logging estructurado de peticiones |
+| `MetricsMiddleware` | `middlewares/metrics.py` | Métricas de latency y throughput |
+
+## Próximos pasos
+
+Los [Health checks](./health-checks) son puntos finales que no pasan por
+middlewares de validación JSON:API y permiten a la orquestación verificar
+el estado del servicio.

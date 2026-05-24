@@ -1,8 +1,150 @@
 ---
-title: Authorization
-description: Documentación sobre Authorization
+title: Autorización
+description: Mecanismos de autorización en GEMA, incluyendo endpoints protegidos con HTTPBearer, validación de tipo de token, verificación de usuario activo y control de ownership. Sin implementación de roles aún
 ---
 
-# Authorization
+# Autorización
 
-Contenido en desarrollo para Authorization.
+La autorización en GEMA opera a nivel de endpoint y de caso de uso. No hay un
+sistema de roles (RBAC) implementado todavía, pero los mecanismos actuales
+protegen los recursos mediante validación de credenciales, tipo de token y
+estado del usuario.
+
+## Protección de endpoints
+
+Los endpoints que requieren autenticación usan `HTTPBearer` de FastAPI. El
+middleware `HTTPAuthorizationCredentials` extrae el token del header
+`Authorization: Bearer <token>`.
+
+```python
+from fastapi.security import HTTPBearer
+
+security = HTTPBearer()
+
+
+@router.get("/me", status_code=status.HTTP_200_OK)
+async def get_current_user(
+    token: HTTPAuthorizationCredentials = Depends(security),
+    use_case: GetCurrentUserUseCase = Depends(
+        get_get_current_user_use_case
+    ),
+) -> UserDocument:
+    ...
+```
+
+### Endpoints protegidos vs públicos
+
+| Endpoint | Protegido | Método |
+|---|---|---|
+| `/v1/auth/register` | No | POST |
+| `/v1/auth/login` | No | POST |
+| `/v1/auth/refresh` | No | POST |
+| `/v1/auth/logout` | Sí | POST |
+| `/v1/auth/me` | Sí | GET |
+
+## Verificación de tipo de token
+
+El sistema emite dos tipos de token JWT: `access` y `refresh`. Cada endpoint
+protegido verifica que el token sea de tipo `access`.
+
+```python
+# En GetCurrentUserUseCase
+claims = await self.token_service.decode_token(access_token)
+
+if claims.get("type") != "access":
+    raise InvalidTokenError(
+        "Se requiere un token de acceso válido para esta operación."
+    )
+```
+
+> [!NOTE]
+> El token de refresco solo se puede usar en el endpoint `/v1/auth/refresh`.
+> Intentar usarlo en `/v1/auth/me` o `/v1/auth/logout` produce un error 401.
+
+## Verificación de usuario activo
+
+Cuando un caso de uso necesita información del usuario autenticado (por
+ejemplo, `GetCurrentUserUseCase`), verifica que el usuario no esté inactivo:
+
+```python
+user = await self.uow.users.get_by_id(UserId.from_string(sub))
+if not user or not user.is_active:
+    raise UserInactiveError(
+        "El usuario no existe o se encuentra inactivo."
+    )
+```
+
+Si el usuario fue desactivado, el endpoint devuelve **403 Forbidden** con el
+código `ERR_USER_INACTIVE`.
+
+## Verificación de ownership
+
+El caso de uso `LogoutUserUseCase` protege contra un escenario donde un
+usuario podría intentar revocar tokens de otro. El mecanismo se basa en que el
+token de acceso contiene el `sub` (User ID del propietario) y el endpoint solo
+permite revocar el token que el cliente posee:
+
+```python
+class LogoutUserUseCase:
+    async def execute(self, access_token: str) -> None:
+        claims = await self.token_service.decode_token(access_token)
+
+        if claims.get("type") != "access":
+            raise InvalidTokenError(
+                "Solo se pueden revocar tokens de acceso "
+                "durante el cierre de sesión."
+            )
+
+        jti = claims["jti"]
+        exp = claims["exp"]
+        await self.token_service.revoke_token(jti=jti, exp=exp)
+```
+
+El JTI (identificador único del token) está ligado al `sub` del token. Como
+el token se decodifica y valida con la clave secreta del servidor, es
+imposible que un usuario falsifique el JTI de otro.
+
+## Protección contra refresh token sharing
+
+El caso de uso `RefreshTokenUseCase` evita que un mismo refresh token se use
+múltiples veces: al refrescar, el JTI del token anterior se revoca en Redis
+antes de emitir el nuevo par.
+
+```
+POST /v1/auth/refresh
+  → decodifica refresh token
+  → revoca JTI en Redis
+  → verifica usuario activo
+  → genera nuevo par (access + refresh)
+```
+
+Si un atacante intercepta un refresh token y lo usa, el propietario legítimo
+obtendrá un `InvalidTokenError` al intentar refrescar de nuevo.
+
+## Inyección de dependencias
+
+Los casos de uso se inyectan a través del contenedor de dependencias. La capa
+de presentación nunca instancia infraestructura directamente:
+
+```python
+# En container.py
+async def get_get_current_user_use_case(
+    uow: UnitOfWorkPort = Depends(get_uow),
+    token_service: TokenServicePort = Depends(get_token_service),
+) -> GetCurrentUserUseCase:
+    return GetCurrentUserUseCase(uow, token_service)
+```
+
+## Mapa de excepciones de autorización
+
+| Excepción | Código HTTP | Código de error | Cuándo ocurre |
+|---|---|---|---|
+| `InvalidTokenError` | 401 | `ERR_INVALID_TOKEN` | Token expirado, revocado, tipo incorrecto o firma inválida |
+| `InvalidCredentialsError` | 401 | `ERR_INVALID_CREDENTIALS` | Email o contraseña incorrectos |
+| `UserInactiveError` | 403 | `ERR_USER_INACTIVE` | Usuario desactivado o suspendido |
+
+## Próximos pasos
+
+- Consulta el mapeo completo contra OWASP Top 10 en [OWASP](./owasp).
+- Revisa la configuración de rate limiting en
+  [CORS y rate limiting](./cors-rate-limiting).

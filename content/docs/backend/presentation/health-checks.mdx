@@ -1,8 +1,79 @@
 ---
-title: Health Checks
-description: Documentación sobre Health Checks
+title: Health checks
+description: Endpoints de liveness y readiness para orquestación
 ---
 
-# Health Checks
+Los health checks permiten a los orquestadores (Docker Compose, Kubernetes)
+saber si la aplicación está viva y lista para recibir tráfico.
 
-Contenido en desarrollo para Health Checks.
+Archivo: `src/app/presentation/api/v1/endpoints/health.py`
+
+```python
+from fastapi import APIRouter, HTTPException, status
+from app.infrastructure.cache.redis import redis_client
+from app.infrastructure.db.session import engine
+
+
+router = APIRouter(prefix="/health", tags=["health"])
+```
+
+## Liveness — `/health/live`
+
+```python
+@router.get("/live", status_code=status.HTTP_200_OK, summary="Liveness")
+async def liveness() -> dict[str, str]:
+    return {"status": "ok"}
+```
+
+Responde siempre 200. Verifica que el proceso de la aplicación está en
+ejecución. No hace ninguna consulta externa.
+
+## Readiness — `/health/ready`
+
+```python
+@router.get("/ready", status_code=status.HTTP_200_OK, summary="Readiness")
+async def readiness() -> dict[str, str]:
+    try:
+        async with engine.connect() as conn:
+            pass
+        await redis_client.execute_command("PING")
+        return {"status": "ready"}
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Service unavailable: {e}",
+        )
+```
+
+Verifica que la aplicación puede conectarse a **PostgreSQL** (hace una
+conexión al engine) y a **Redis** (ejecuta `PING`). Si alguno falla,
+retorna 503.
+
+> [!NOTE]
+> La diferencia entre liveness y readiness: **liveness** dice "el proceso
+> está vivo", **readiness** dice "el proceso está listo para recibir
+> tráfico". En Kubernetes, readiness determina si el pod recibe peticiones;
+> liveness determina si se reinicia.
+
+## Registro
+
+El router de health se registra directamente en `main.py`, sin pasar por el
+`v1_router`, porque los health checks no pertenecen a ninguna versión de
+API:
+
+```python
+app.include_router(health_router)
+```
+
+## Excepción JSON:API
+
+Los health checks son los únicos endpoints que **no** usan formato JSON:API.
+Retornan un `dict[str, str]` plano (`{"status": "ok"}` / `{"status": "ready"}`)
+para compatibilidad con sondas de orquestación (Docker Compose health checks,
+Kubernetes liveness/readiness probes) que esperan respuestas simples.
+
+## Próximos pasos
+
+El [Versionado de API](./api-versioning) explica cómo se organizan las
+rutas de la API y cómo el health check queda fuera del esquema de
+versiones.
