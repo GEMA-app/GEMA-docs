@@ -1,0 +1,33 @@
+---
+title: ADR-003 — JSON:API como contrato bidireccional
+description: Formato estándar JSON API para entrada y salida, con IDs como strings
+---
+
+# ADR-003: JSON:API como contrato bidireccional
+
+- **Estado:** Aceptado
+- **Fecha:** 2026-05-18
+
+## Contexto
+
+Necesitábamos un formato estándar y predecible para todas las interacciones API, tanto de entrada como de salida. Además, JSON:API exige que los campos `id` sean strings, mientras que nuestros identificadores de dominio son UUIDs nativos de Python.
+
+## Decisión
+
+- Implementar JSON:API con middlewares que validan `Content-Type` y `Accept` en todas las rutas
+- Configurable con `STRICT_JSONAPI=false` para entornos que requieran `application/json` como alternativa
+- `UserId` expone `__str__()` que retorna el UUID como string, y `from_string(s)` para reconstruirlo
+- El `sub` del JWT se serializa como string desde el origen
+
+## Consecuencias
+
+- Todas las respuestas usan `application/vnd.api+json`
+- Los errores siguen el formato JSON:API con `errors[]` y `source.pointer`
+- Los UUIDs viajan como strings en la capa de transporte y se复原encomoUUIDs en la capa de dominio
+- Health checks (`/health/live`, `/health/ready`) son la única excepción documentada — retornan `dict` plano para compatibilidad con sondas de orquestación
+
+## Referencias
+
+- [Middlewares](../presentation/middlewares)
+- [Health checks](../presentation/health-checks)
+- [Value objects](../domain/value-objects)

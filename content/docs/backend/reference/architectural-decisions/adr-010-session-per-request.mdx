@@ -1,0 +1,37 @@
+---
+title: ADR-010 — Sesión por request sin scoped_session
+description: Cada transacción crea su propia sesión SQLAlchemy.
+---
+
+# ADR-010: Sesión por request sin scoped_session
+
+- **Estado:** Aceptado
+- **Fecha:** 2026-05-18
+
+## Contexto
+
+SQLAlchemy recomienda `scoped_session` para sincronizar la sesión en el mismo thread, pero en FastAPI asíncrono este patrón no aplica. Cada request puede ejecutarse en un contexto diferente y compartir una sesión global puede causar fugas de datos entre requests.
+
+## Decisión
+
+Cada `SqlAlchemyUnitOfWork` crea una `AsyncSession` nueva con `session_factory()` al entrar en el contexto. No hay sesión global ni compartida.
+
+```python
+class SqlAlchemyUnitOfWork(UnitOfWorkPort):
+    async def __aenter__(self) -> Self:
+        self.session = self.session_factory()
+        self.users = SqlAlchemyUserRepository(self.session)
+        return self
+```
+
+## Consecuencias
+
+- Cada transacción tiene su propia sesión aislada
+- El UoW gestiona el ciclo de vida completo: crear, commit/rollback, cerrar
+- No hay riesgo de fuga de datos entre requests
+- Se prescinde de `scoped_session` y su complejidad asociada
+
+## Referencias
+
+- [Async SQLAlchemy](../infrastructure/async-sqlalchemy)
+- ADR-002: Unit of Work como async context manager

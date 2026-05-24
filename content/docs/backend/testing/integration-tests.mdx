@@ -1,8 +1,283 @@
 ---
-title: Integration Tests
-description: Documentación sobre Integration Tests
+title: Tests de integración
+description: Pruebas de integración contra PostgreSQL y Redis reales con Docker Compose. Fixtures de base de datos, repositorios, tokens JWT y hashing.
 ---
 
-# Integration Tests
+# Tests de integración
 
-Contenido en desarrollo para Integration Tests.
+Los tests de integración verifican que los adaptadores de infraestructura
+funcionan correctamente contra sus dependencias reales: PostgreSQL, Redis y
+las librerías de hashing/JWT.
+
+> [!NOTE]
+> Los tests de integración están por escribir. Los directorios
+> `tests/integration/` ya existen con los `conftest.py` y `__init__.py`
+> necesarios.
+
+## Requisitos
+
+Los tests de integración requieren que los servicios de Docker estén
+levantados:
+
+```bash
+docker compose up -d db redis
+```
+
+Alternativamente, puedes apuntar a instancias locales de PostgreSQL y Redis
+configurando las variables de entorno correspondientes.
+
+## Estructura de tests
+
+```
+tests/
+├── conftest.py
+├── integration/
+│   ├── __init__.py
+│   ├── conftest.py          # Fixtures de base de datos y Redis
+│   ├── test_user_repository.py
+│   ├── test_unit_of_work.py
+│   ├── test_jwt_service.py
+│   └── test_password_hasher.py
+```
+
+## Fixtures compartidas
+
+En `tests/integration/conftest.py` se definen las fixtures que conectan con
+los servicios reales:
+
+```python
+import pytest
+import pytest_asyncio
+from sqlalchemy.ext.asyncio import (
+    AsyncSession, create_async_engine, async_sessionmaker
+)
+from app.infrastructure.db.base import Base
+from app.infrastructure.config.settings import settings
+from app.infrastructure.cache.redis import redis_client
+
+
+@pytest_asyncio.fixture
+async def db_session():
+    """Crea una sesión de base de datos y hace rollback al finalizar."""
+    engine = create_async_engine(settings.DATABASE_URL)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    session_factory = async_sessionmaker(
+        engine, class_=AsyncSession, expire_on_commit=False
+    )
+    async with session_factory() as session:
+        yield session
+        await session.rollback()
+
+    await engine.dispose()
+
+
+@pytest_asyncio.fixture
+async def redis():
+    """Limpia Redis antes de cada test y devuelve el cliente."""
+    await redis_client.flushdb()
+    yield redis_client
+    await redis_client.flushdb()
+```
+
+> [!WARNING]
+> Las fixtures de integración crean y destruyen tablas. En un entorno
+> compartido, usa un schema de base de datos temporal o una base de datos
+> dedicada para los tests.
+
+## Tests del repositorio
+
+```python
+class TestSqlAlchemyUserRepository:
+    @pytest.mark.asyncio
+    async def test_save_and_get_by_email(self, db_session):
+        repo = SqlAlchemyUserRepository(db_session)
+        email = Email(value="user@example.com")
+        hashed = HashedPassword(value="$2b$12$hashed_value")
+        user = User.register(email=email, hashed_password=hashed)
+
+        await repo.save(user)
+        await db_session.commit()
+
+        found = await repo.get_by_email(email)
+        assert found is not None
+        assert found.email.value == "user@example.com"
+        assert found.is_active is True
+
+    @pytest.mark.asyncio
+    async def test_get_by_email_not_found(self, db_session):
+        repo = SqlAlchemyUserRepository(db_session)
+        email = Email(value="nonexistent@example.com")
+
+        result = await repo.get_by_email(email)
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_get_by_id(self, db_session):
+        repo = SqlAlchemyUserRepository(db_session)
+        email = Email(value="user@example.com")
+        user = User.register(
+            email=email, hashed_password=HashedPassword(value="hash")
+        )
+
+        await repo.save(user)
+        await db_session.commit()
+
+        found = await repo.get_by_id(user.id)
+        assert found is not None
+        assert str(found.id) == str(user.id)
+
+    @pytest.mark.asyncio
+    async def test_repository_does_not_commit(self, db_session):
+        """El repositorio solo hace add, nunca commit."""
+        repo = SqlAlchemyUserRepository(db_session)
+        email = Email(value="user@example.com")
+        user = User.register(
+            email=email, hashed_password=HashedPassword(value="hash")
+        )
+
+        await repo.save(user)
+        # Sin commit, la base de datos no debe tener el registro
+        result = await repo.get_by_email(email)
+        assert result is None
+```
+
+## Tests del Unit of Work
+
+```python
+class TestSqlAlchemyUnitOfWork:
+    @pytest.mark.asyncio
+    async def test_commit_persists_data(self, db_session):
+        uow = SqlAlchemyUnitOfWork()
+        async with uow:
+            user = User.register(
+                email=Email(value="user@example.com"),
+                hashed_password=HashedPassword(value="hash"),
+            )
+            await uow.users.save(user)
+            await uow.commit()
+
+        # Verificar con una sesión nueva
+        async with db_session.begin():
+            result = await db_session.execute(
+                select(UserModel).where(
+                    UserModel.email == "user@example.com"
+                )
+            )
+            assert result.scalar_one_or_none() is not None
+
+    @pytest.mark.asyncio
+    async def test_rollback_on_exception(self, db_session):
+        uow = SqlAlchemyUnitOfWork()
+        with pytest.raises(RuntimeError):
+            async with uow:
+                user = User.register(
+                    email=Email(value="user@example.com"),
+                    hashed_password=HashedPassword(value="hash"),
+                )
+                await uow.users.save(user)
+                raise RuntimeError("Fallo simulado")
+
+        # No debe haber datos
+        async with db_session.begin():
+            result = await db_session.execute(
+                select(UserModel).where(
+                    UserModel.email == "user@example.com"
+                )
+            )
+            assert result.scalar_one_or_none() is None
+```
+
+## Tests del servicio JWT
+
+```python
+class TestPyJwtTokenService:
+    @pytest.mark.asyncio
+    async def test_generate_and_decode_access_token(self, redis):
+        service = PyJwtTokenService(redis)
+        token = await service.generate_access_token(
+            subject="user-123"
+        )
+
+        claims = await service.decode_token(token)
+        assert claims["sub"] == "user-123"
+        assert claims["type"] == "access"
+        assert "jti" in claims
+        assert "exp" in claims
+        assert "iat" in claims
+
+    @pytest.mark.asyncio
+    async def test_revoked_token_raises_error(self, redis):
+        service = PyJwtTokenService(redis)
+        token = await service.generate_access_token(
+            subject="user-123"
+        )
+        claims = await service.decode_token(token)
+
+        await service.revoke_token(jti=claims["jti"], exp=claims["exp"])
+
+        with pytest.raises(InvalidTokenError, match="revocado"):
+            await service.decode_token(token)
+
+    @pytest.mark.asyncio
+    async def test_decode_expired_token_raises_error(self, redis):
+        service = PyJwtTokenService(redis)
+        # Token con exp pasado (solo para test)
+        expired_token = jwt.encode(
+            {
+                "sub": "user-123",
+                "jti": str(uuid.uuid4()),
+                "type": "access",
+                "exp": 0,  # Unix epoch = ya expiró
+                "iat": 0,
+            },
+            settings.JWT_SECRET_KEY,
+            algorithm=settings.JWT_ALGORITHM,
+        )
+
+        with pytest.raises(InvalidTokenError, match="expirado"):
+            await service.decode_token(expired_token)
+```
+
+## Tests del hasher
+
+```python
+class TestBcryptPasswordHasher:
+    def test_hash_and_verify(self):
+        hasher = BcryptPasswordHasher()
+        password = "StrongP@ss1"
+
+        hashed = hasher.hash(password)
+        assert hasher.verify(password, hashed) is True
+
+    def test_verify_wrong_password(self):
+        hasher = BcryptPasswordHasher()
+        hashed = hasher.hash("StrongP@ss1")
+
+        assert hasher.verify("WrongP@ss1", hashed) is False
+
+    def test_verify_invalid_hash_returns_false(self):
+        hasher = BcryptPasswordHasher()
+        assert hasher.verify("password", "invalid_hash") is False
+```
+
+## Cómo ejecutar los tests
+
+```bash
+# Asegúrate de que Docker esté corriendo
+docker compose up -d db redis
+
+# Tests de integración
+pytest tests/integration/ -v
+
+# Con más detalles de base de datos
+pytest tests/integration/ -v --tb=long
+```
+
+## Próximos pasos
+
+- Consulta los [tests e2e](./contract-tests) para validar los endpoints
+  completos.
+- Revisa los [tests de seguridad](./security-tests) para verificar las
+  protecciones implementadas.

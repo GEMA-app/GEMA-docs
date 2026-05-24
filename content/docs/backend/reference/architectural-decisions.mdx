@@ -1,8 +1,32 @@
 ---
-title: Architectural Decisions
-description: Documentación sobre Architectural Decisions
+title: Decisiones arquitectónicas (ADR)
+description: Índice de todas las decisiones arquitectónicas registradas del proyecto.
 ---
 
-# Architectural Decisions
+# Registro de decisiones arquitectónicas
 
-Contenido en desarrollo para Architectural Decisions.
+Este registro documenta las decisiones arquitectónicas más importantes del proyecto. Cada entrada incluye el contexto que motivó la decisión, la opción elegida y las consecuencias que implica.
+
+---
+
+## Aceptados
+
+| ADR | Título | Archivo |
+|-----|--------|---------|
+| 001 | Arquitectura hexagonal con puertos Protocol | [Ver](architectural-decisions/adr-001-hexagonal-protocol) |
+| 002 | Unit of Work como async context manager | [Ver](architectural-decisions/adr-002-unit-of-work) |
+| 003 | JSON:API como contrato bidireccional | [Ver](architectural-decisions/adr-003-jsonapi) |
+| 004 | Rate limiting con script Lua atómico y fail-open | [Ver](architectural-decisions/adr-004-rate-limit) |
+| 005 | bcrypt directo sin passlib | [Ver](architectural-decisions/adr-005-bcrypt) |
+| 006 | PyJWT sobre python-jose | [Ver](architectural-decisions/adr-006-pyjwt) |
+| 007 | Blocklist JWT con TTL obligatorio | [Ver](architectural-decisions/adr-007-blocklist-ttl) |
+| 008 | Validación de contraseña antes de hashear (fail-fast) | [Ver](architectural-decisions/adr-008-password-validate-before-hash) |
+| 009 | Settings con extra="forbid" | [Ver](architectural-decisions/adr-009-settings-extra-forbid) |
+| 010 | Sesión por request sin scoped_session | [Ver](architectural-decisions/adr-010-session-per-request) |
+| 011 | Domain exceptions mapeadas a HTTP en presentación | [Ver](architectural-decisions/adr-011-domain-exceptions-http) |
+
+## Planeados
+
+| ADR | Título | Archivo |
+|-----|--------|---------|
+| 012 | CQRS como funcionalidad planeada/experimental | [Ver](architectural-decisions/adr-012-cqrs-planned) |

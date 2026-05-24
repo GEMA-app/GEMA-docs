@@ -1,0 +1,36 @@
+---
+title: ADR-009 — Settings con extra="forbid"
+description: Detección temprana de errores tipográficos en variables de entorno.
+---
+
+# ADR-009: Settings con extra="forbid"
+
+- **Estado:** Aceptado
+- **Fecha:** 2026-05-18
+
+## Contexto
+
+Los errores tipográficos en `.env` pueden pasar desapercibidos y causar fallos difíciles de depurar en producción. Por ejemplo, `DATABSE_URL` en lugar de `DATABASE_URL` crea una variable que el código nunca lee, silenciosamente.
+
+## Decisión
+
+`Settings` usa `extra="forbid"` en su configuración:
+
+```python
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(env_file=".env", extra="forbid", case_sensitive=False)
+```
+
+Cualquier variable definida en `.env` que no esté declarada en la clase `Settings` provoca un error al arrancar la aplicación.
+
+Además, en producción se valida que `JWT_SECRET_KEY` tenga al menos 32 caracteres y no sea el valor por defecto.
+
+## Consecuencias
+
+- Error inmediato si hay una variable mal escrita en `.env`
+- Sin sorpresas en producción por configuraciones inválidas
+- La aplicación no arranca si `JWT_SECRET_KEY` es débil en producción
+
+## Referencias
+
+- [Configuración](../getting-started/configuration)

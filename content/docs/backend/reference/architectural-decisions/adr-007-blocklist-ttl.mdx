@@ -1,0 +1,35 @@
+---
+title: ADR-007 — Blocklist JWT con TTL obligatorio
+description: Revocación de tokens JWT con autolimpieza en Redis.
+---
+
+# ADR-007: Blocklist JWT con TTL obligatorio
+
+- **Estado:** Aceptado
+- **Fecha:** 2026-05-18
+
+## Contexto
+
+Los tokens revocados se almacenan en Redis para impedir su reuso. Sin un TTL, la blocklist crece indefinidamente y consume memoria sin límite.
+
+## Decisión
+
+Al revocar un token, el TTL en Redis se calcula como `exp - now`. Si `exp - now <= 0`, el token ya expiró y no se almacena.
+
+```python
+ttl = exp - now
+if ttl > 0:
+    await self.redis.set(f"blocklist:{jti}", "revoked", ex=ttl)
+```
+
+## Consecuencias
+
+- La blocklist se autolimpia: cuando un token expira, su entrada en Redis expira automáticamente
+- No hay necesidad de un job de limpieza periódica
+- Solo los tokens dentro de su ventana de vida útil ocupan memoria
+- La revocación se verifica en `decode_token()` consultando `blocklist:{jti}` antes de devolver los claims
+
+## Referencias
+
+- [Autenticación](../security/authentication)
+- [Cache con Redis](../infrastructure/cache)

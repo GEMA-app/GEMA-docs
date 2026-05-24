@@ -1,0 +1,36 @@
+---
+title: ADR-002 — Unit of Work como async context manager
+description: Frontera transaccional con repositorios ligados a la sesión.
+---
+
+# ADR-002: Unit of Work como async context manager dueño de repositorios
+
+- **Estado:** Aceptado
+- **Fecha:** 2026-05-18
+
+## Contexto
+
+Necesitábamos una frontera transaccional clara donde sesión, repositorio y commit vivan dentro del mismo ámbito, sin riesgo de que un repositorio use una sesión diferente a la del UoW.
+
+## Decisión
+
+`UnitOfWorkPort` se define como un async context manager (`__aenter__` / `__aexit__`). Al entrar, crea una `AsyncSession` y construye el repositorio con esa misma sesión. El repositorio nunca hace `commit()`.
+
+```python
+async with uow:
+    await uow.users.save(user)
+    await uow.commit()
+```
+
+Si ocurre una excepción dentro del bloque, `__aexit__` ejecuta `rollback()` automáticamente antes de cerrar la sesión.
+
+## Consecuencias
+
+- El UoW es el único responsable del ciclo de vida de la sesión
+- No se inyecta sesión por separado al repositorio y al UoW
+- Cada transacción crea su propia sesión (sin `scoped_session`)
+
+## Referencias
+
+- [Unit of Work](../application/unit-of-work)
+- ADR-011: Sesión por request sin scoped_session

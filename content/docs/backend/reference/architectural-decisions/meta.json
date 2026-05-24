@@ -1,0 +1,17 @@
+{
+  "title": "Decisiones Arquitectónicas",
+  "pages": [
+    "adr-001-hexagonal-protocol",
+    "adr-002-unit-of-work",
+    "adr-003-jsonapi",
+    "adr-004-rate-limit",
+    "adr-005-bcrypt",
+    "adr-006-pyjwt",
+    "adr-007-blocklist-ttl",
+    "adr-008-password-validate-before-hash",
+    "adr-009-settings-extra-forbid",
+    "adr-010-session-per-request",
+    "adr-011-domain-exceptions-http",
+    "adr-012-cqrs-planned"
+  ]
+}

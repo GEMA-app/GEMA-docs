@@ -1,0 +1,39 @@
+---
+title: ADR-004 — Rate limiting atómico con fail-open
+description: Límite de tasa por IP con script Lua y degradación controlada.
+---
+
+# ADR-004: Rate limiting con script Lua atómico y fail-open
+
+- **Estado:** Aceptado
+- **Fecha:** 2026-05-18
+
+## Contexto
+
+Necesitábamos proteger endpoints críticos (login, register, refresh) contra abusos. Además, `INCR` y `EXPIRE` como comandos separados en Redis tienen una race condition: si el proceso falla entre ambos, la clave nunca expira y el rate limit se vuelve permanente.
+
+## Decisión
+
+- Middleware `RateLimitMiddleware` con límites por endpoint y dirección IP
+- Límites: `/auth/login` = 5/min, `/auth/register` = 3/min, `/auth/refresh` = 10/min
+- Script Lua registrado con `register_script()` que ejecuta `INCR` y `EXPIRE` en una sola operación atómica, eliminando la race condition
+- Si Redis falla, el middleware captura `RedisError`, registra el error y permite la solicitud (fail-open)
+
+```lua
+local current = redis.call('INCR', KEYS[1])
+if current == 1 then
+    redis.call('EXPIRE', KEYS[1], ARGV[1])
+end
+return current
+```
+
+## Consecuencias
+
+- Sin race conditions entre INCR y EXPIRE
+- Preferimos permitir más solicitudes de las debidas a bloquear la API entera si Redis está caído
+- Los logs alertan cuando Redis no está disponible
+- La clave de rate limit usa la IP real (`X-Forwarded-For` si existe, `request.client.host` si no)
+
+## Referencias
+
+- [CORS y rate limiting](../security/cors-rate-limiting)

@@ -1,0 +1,41 @@
+---
+title: ADR-005 — bcrypt directo sin passlib
+description: Hashing de contraseñas con bcrypt nativo, eliminando dependencia abandonada.
+---
+
+# ADR-005: bcrypt directo sin passlib
+
+- **Estado:** Aceptado
+- **Fecha:** 2026-05-18
+
+## Contexto
+
+`passlib` está abandonada (último release en 2020) y es incompatible con Python 3.13+. Necesitábamos una alternativa mantenida para el hashing de contraseñas.
+
+## Decisión
+
+Usar la librería `bcrypt` directamente con `hashpw()` y `checkpw()`, codificando las contraseñas a bytes con `.encode("utf-8")`.
+
+```python
+class BcryptPasswordHasher(PasswordHasherPort):
+    def hash(self, password: str) -> str:
+        salt = bcrypt.gensalt()
+        return bcrypt.hashpw(password.encode(), salt).decode()
+
+    def verify(self, password: str, hashed: str) -> bool:
+        try:
+            return bcrypt.checkpw(password.encode(), hashed.encode())
+        except ValueError:
+            return False
+```
+
+## Consecuencias
+
+- Eliminamos una dependencia problemática y no mantenida
+- El código es más explícito y fácil de auditar
+- `BcryptPasswordHasher` implementa `PasswordHasherPort`, permitiendo cambiar el algoritmo sin modificar casos de uso
+
+## Referencias
+
+- [Autenticación](../security/authentication)
+- ADR-008: Validación de contraseña antes de hashear

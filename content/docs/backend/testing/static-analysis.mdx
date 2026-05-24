@@ -1,8 +1,225 @@
 ---
-title: Static Analysis
-description: Documentación sobre Static Analysis
+title: Análisis estático
+description: Herramientas de análisis estático configuradas en el proyecto, incluyendo Ruff para linting, Black para formateo y Mypy para tipado estático. Integración en pre-commit y CI/CD
 ---
 
-# Static Analysis
+# Análisis estático
 
-Contenido en desarrollo para Static Analysis.
+GEMA utiliza tres herramientas de análisis estático para mantener la calidad
+del código: Ruff (linter), Black (formateador) y Mypy (verificador de tipos).
+Todas están configuradas en `pyproject.toml` y se ejecutan como parte del
+flujo de desarrollo.
+
+## Ruff
+
+Ruff es el linter de Python más rápido del mercado. Está configurado en
+`pyproject.toml`:
+
+```toml
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "UP", "B", "SIM", "D"]
+ignore = ["D100", "D104"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+```
+
+### Reglas habilitadas
+
+| Código | Categoría |
+|---|---|
+| `E` | Errores de estilo (pycodestyle) |
+| `W` | Advertencias de estilo (pycodestyle) |
+| `F` | Errores lógicos (Pyflakes) |
+| `I` | Orden de imports (isort) |
+| `UP` | Actualizaciones de sintaxis para versiones modernas de Python (pyupgrade) |
+| `B` | Errores comunes (flake8-bugbear) |
+| `SIM` | Simplificación de código (flake8-simplify) |
+| `D` | Convenciones de docstrings (pydocstyle, con convención Google) |
+
+### Reglas ignoradas
+
+- `D100` — Docstring faltante en módulo público
+- `D104` — Docstring faltante en `__init__.py`
+
+### Uso
+
+```bash
+# Verificar todo el código
+ruff check .
+
+# Verificar con formato de salida detallado
+ruff check . --show-fixes
+
+# Corregir automáticamente lo que sea posible
+ruff check . --fix
+```
+
+### Integración en CI
+
+```bash
+ruff check src/ tests/
+```
+
+Si Ruff encuentra problemas, el pipeline falla con un código de salida
+distinto de cero.
+
+## Black
+
+Black es el formateador de código. Garantiza que todo el código del proyecto
+tenga el mismo estilo sin necesidad de discusiones sobre formato.
+
+```toml
+[tool.black]
+line-length = 100
+target-version = ["py312"]
+```
+
+### Uso
+
+```bash
+# Formatear archivos en su lugar
+black .
+
+# Verificar si hay archivos sin formatear (dry-run)
+black . --check
+
+# Ver con diferencias
+black . --diff
+```
+
+### Flujo recomendado
+
+Ejecuta Black antes de Ruff para que Ruff no señale problemas de formato que
+Black ya corrige:
+
+```bash
+black .
+ruff check .
+```
+
+## Mypy
+
+Mypy verifica los tipos estáticos del código. Está configurado en modo
+estricto (`strict = true`), lo que activa todas las opciones de verificación:
+
+```toml
+[tool.mypy]
+python_version = "3.12"
+strict = true
+```
+
+### Uso
+
+```bash
+# Verificar el código fuente
+mypy src/
+
+# Verificar incluyendo tests
+mypy src/ tests/
+
+# Ignorar imports faltantes de librerías sin stubs
+mypy src/ --ignore-missing-imports
+```
+
+### Qué detecta Mypy en modo estricto
+
+- Argumentos sin tipo
+- Valores de retorno sin tipo
+- Asignaciones incompatibles
+- Uso de `Any` implícito
+- Llamadas a métodos que no existen en el tipo declarado
+- Inconsistencias entre `Protocol` y sus implementaciones
+
+### Stubs para dependencias
+
+Algunas dependencias pueden no tener stubs de tipos. En ese caso, puedes:
+
+1. Instalar stubs: `pip install types-redis types-PyYAML`
+2. Usar `# type: ignore[import]` en líneas concretas
+3. Usar `--ignore-missing-imports` de forma global (no recomendado)
+
+## Tabla resumen
+
+| Herramienta | Propósito | Comando | En CI |
+|---|---|---|---|
+| Ruff | Linting y estilo | `ruff check .` | `ruff check src/ tests/` |
+| Black | Formateo automático | `black .` | `black . --check` |
+| Mypy | Verificación de tipos | `mypy src/` | `mypy src/` |
+
+## Integración con pre-commit (recomendado)
+
+Para ejecutar las tres herramientas automáticamente antes de cada commit,
+puedes configurar pre-commit:
+
+```yaml
+# .pre-commit-config.yaml
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.11.0
+    hooks:
+      - id: ruff
+        args: [--fix]
+  - repo: https://github.com/psf/black-pre-commit-mirror
+    rev: 25.1.0
+    hooks:
+      - id: black
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.15.0
+    hooks:
+      - id: mypy
+        args: [src/]
+        pass_filenames: false
+```
+
+Instalación:
+
+```bash
+pip install pre-commit
+pre-commit install
+```
+
+## Scripts recomendados (pyproject.toml)
+
+Puedes añadir scripts en `[tool.poe.tasks]` si usas `poethepoet`, o usar
+scripts Makefile/Justfile equivalentes:
+
+```toml
+[tool.poe.tasks]
+lint = "ruff check src/ tests/"
+format = "black ."
+format-check = "black . --check"
+typecheck = "mypy src/"
+check = ["format-check", "lint", "typecheck"]
+```
+
+## Puerta de calidad en CI/CD
+
+Un pipeline típico de CI ejecuta estas herramientas en orden:
+
+```yaml
+# Ejemplo de GitHub Actions
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install poetry && poetry install
+      - run: black . --check
+      - run: ruff check src/ tests/
+      - run: mypy src/
+```
+
+## Próximos pasos
+
+- Revisa los [tests unitarios](./unit-tests) para entender cómo se prueba el
+  código verificado por estas herramientas.
+- Consulta la [guía de estilo](../getting-started/style-guide) para las
+  convenciones de código del proyecto.

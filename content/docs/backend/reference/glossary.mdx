@@ -1,8 +1,202 @@
 ---
-title: Glossary
-description: Documentación sobre Glossary
+title: Glosario
+description: Definiciones de los términos técnicos y de dominio usados en el proyecto. Arquitectura hexagonal, DDD, JSON API, JWT y conceptos de infraestructura
 ---
 
-# Glossary
+# Glosario
 
-Contenido en desarrollo para Glossary.
+### Agregado (Aggregate)
+
+Conjunto de objetos de dominio que se tratan como una unidad cohesionada. Una
+raíz de agregado garantiza la consistencia de todos sus miembros. No
+implementado actualmente; previsto para Nivel 3.
+
+- **Ver**: [Niveles de aplicabilidad](./applicability-levels)
+
+### Alembic
+
+Herramienta de migraciones para SQLAlchemy. Permite gestionar cambios en el
+esquema de la base de datos de forma versionada.
+
+- **Ver**: [Migraciones](../infrastructure/migrations)
+
+### Arquitectura hexagonal
+
+Patrón arquitectónico que organiza el código en capas concéntricas: dominio
+(centro), aplicación, infraestructura y presentación (exterior). Las
+dependencias apuntan hacia adentro: el dominio nunca conoce la infraestructura.
+
+- **Ver**: [Visión general de capas](../architecture/layers-overview)
+
+### ASGI
+
+Asynchronous Server Gateway Interface. Especificación que define cómo se
+comunican los servidores web asíncronos con las aplicaciones Python. FastAPI
+implementa ASGI.
+
+### Bcrypt
+
+Algoritmo de hashing de contraseñas basado en Blowfish. Es lento por diseño
+para dificultar ataques de fuerza bruta. Se usa directamente, sin envoltorios.
+
+- **Ver**: [Autenticación](../security/authentication)
+
+### Blocklist (lista de bloqueo)
+
+Almacén en Redis de los JTI de tokens revocados. Cada entrada tiene un TTL
+igual al tiempo de vida restante del token para que se autolimpie.
+
+- **Ver**: [Autenticación](../security/authentication)
+
+### Composition Root
+
+Lugar único en la aplicación donde se instancian y conectan todas las
+dependencias. En GEMA está en `src/app/composition/container.py`.
+
+- **Ver**: [Composition Root](../architecture/composition-root)
+
+### CQRS
+
+Command Query Responsibility Segregation. Patrón que separa las operaciones de
+escritura (Commands) de las de lectura (Queries) en modelos distintos.
+Planeado, no implementado.
+
+- **Ver**: [CQRS](../application/cqrs)
+
+### Dependency Inversion Principle (DIP)
+
+Principio SOLID que dice que los módulos de alto nivel no deben depender de
+los de bajo nivel; ambos deben depender de abstracciones. En GEMA, las
+abstracciones son los `Protocol` en la capa de aplicación.
+
+- **Ver**: [Principios arquitectónicos](../architecture/principles)
+
+### Domain-Driven Design (DDD)
+
+Enfoque de diseño de software que pone el modelo de dominio y su lenguaje
+ubicuo en el centro del desarrollo. GEMA aplica DDD táctico (entidades, value
+objects, eventos) a nivel moderado (Nivel 2).
+
+- **Ver**: [Niveles de aplicabilidad](./applicability-levels)
+
+### Domain Event
+
+Mensaje que representa algo que ocurrió en el dominio y que otras partes del
+sistema pueden querer procesar. Ejemplo: `UserRegistered`, `UserLoggedIn`.
+
+- **Ver**: [Eventos de dominio](../domain/domain-events)
+
+### Entidad (Entity)
+
+Objeto de dominio con una identidad única que persiste a lo largo del tiempo y
+a través de cambios en sus atributos. Ejemplo: `User`.
+
+- **Ver**: [Entidades](../domain/entities)
+
+### Fail-open / Fail-closed
+
+Estrategias de manejo de fallos. Fail-open: el sistema sigue funcionando
+aunque un componente opcional falle (ej. rate limiting sin Redis). Fail-closed:
+el sistema se detiene si un componente crítico falla.
+
+- **Ver**: [CORS y rate limiting](../security/cors-rate-limiting)
+
+### FastAPI
+
+Framework web Python basado en Starlette y Pydantic. Soporta ASGI nativo,
+validación automática con type hints y documentación OpenAPI interactiva.
+
+### JSON:API
+
+Especificación para construir APIs JSON. Define el formato de los recursos,
+relaciones, errores y metadatos. GEMA lo usa como contrato bidireccional
+(Content-Type y Accept validados por middlewares).
+
+- **Ver**: [Middlewares](../presentation/middlewares)
+
+### JTI (JWT Token ID)
+
+Identificador único (UUID v4) incluido en cada token JWT. Se usa para
+revocar tokens específicos en la blocklist de Redis.
+
+- **Ver**: [Autenticación](../security/authentication)
+
+### JWT (JSON Web Token)
+
+Formato compacto y autónomo para transmitir información entre partes como un
+objeto JSON firmado. GEMA usa HS256 con PyJWT.
+
+- **Ver**: [Autenticación](../security/authentication)
+
+### Lenguaje ubicuo (Ubiquitous Language)
+
+Vocabulario compartido entre desarrolladores y expertos de dominio que se
+refleja en el código, los tests y la documentación.
+
+### Migración (Alembic)
+
+Archivo generado por Alembic que describe cambios en el esquema de la base de
+datos (crear tabla, añadir columna, etc.). Se ejecutan en orden secuencial.
+
+- **Ver**: [Migraciones](../infrastructure/migrations)
+
+### ORM (Object-Relational Mapping)
+
+Técnica que mapea tablas de bases de datos relacionales a objetos en el
+código. GEMA usa SQLAlchemy 2.0 con `AsyncSession`.
+
+- **Ver**: [ORM Models](../infrastructure/orm-models)
+
+### Puerto (Port)
+
+Interfaz o contrato definido en la capa de aplicación que especifica cómo el
+dominio interactúa con el mundo exterior. Se implementa como `Protocol` de
+Python.
+
+- **Ver**: [Puertos](../application/ports)
+
+### Rate limiting
+
+Mecanismo que limita el número de solicitudes que un cliente puede hacer a un
+endpoint en un período de tiempo. GEMA lo implementa con Redis y un script
+Lua atómico.
+
+- **Ver**: [CORS y rate limiting](../security/cors-rate-limiting)
+
+### Repositorio (Repository)
+
+Mediador entre el dominio y la persistencia. Oculta los detalles de la base
+de datos y presenta una interfaz tipo colección. En GEMA, el repositorio
+nunca hace `commit()`.
+
+- **Ver**: [Repositorios](../infrastructure/repositories)
+
+### Structlog
+
+Librería de logging estructurado para Python. Produce logs en formato JSON en
+producción y texto coloreado en desarrollo.
+
+- **Ver**: [Logging estructurado](../observability/structured-logging)
+
+### Unit of Work (UoW)
+
+Patrón que mantiene una lista de objetos afectados por una transacción y
+coordina su persistencia. GEMA lo implementa como async context manager que
+posee los repositorios.
+
+- **Ver**: [Unit of Work](../application/unit-of-work)
+
+### Use Case (Caso de uso)
+
+Operación orquestada por la capa de aplicación que coordina puertos y
+entidades para cumplir un objetivo del usuario. Ejemplo: `RegisterUserUseCase`.
+
+- **Ver**: [Casos de uso](../application/use-cases)
+
+### Value Object (VO)
+
+Objeto inmutable que se define por sus atributos, no por una identidad. Dos
+VOs con los mismos valores son intercambiables. Ejemplos: `Email`,
+`PlainPassword`, `UserId`.
+
+- **Ver**: [Value objects](../domain/value-objects)

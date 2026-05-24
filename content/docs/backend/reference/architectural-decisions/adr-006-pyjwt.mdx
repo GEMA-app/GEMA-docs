@@ -1,0 +1,29 @@
+---
+title: ADR-006 — PyJWT sobre python-jose
+description: Librería JWT mantenida activamente para generación y validación de tokens.
+---
+
+# ADR-006: PyJWT sobre python-jose
+
+- **Estado:** Aceptado
+- **Fecha:** 2026-05-18
+
+## Contexto
+
+Necesitábamos una librería JWT que esté mantenida activamente. `python-jose` tiene un ritmo de mantenimiento lento y releases poco frecuentes.
+
+## Decisión
+
+Usar `PyJWT` con el extra `[crypto]` para soporte de algoritmos asimétricos futuros (RS256/ES256). Los tokens se decodifican siempre con `options={"require": ["exp", "sub", "jti"]}` para garantizar que los claims mínimos estén presentes.
+
+## Consecuencias
+
+- `PyJwtTokenService` implementa `TokenServicePort`
+- La validación de claims requeridos es explícita, no confía en valores por defecto
+- El algoritmo se configura vía `JWT_ALGORITHM` (HS256 por defecto)
+- Si en el futuro se necesita RS256, solo cambia el adapter, no los casos de uso
+
+## Referencias
+
+- [Autenticación](../security/authentication)
+- ADR-007: Blocklist JWT con TTL obligatorio

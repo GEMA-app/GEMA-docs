@@ -1,8 +1,270 @@
 ---
-title: Security Tests
-description: Documentación sobre Security Tests
+title: Tests de seguridad
+description: Pruebas de los mecanismos de seguridad, incluyendo validación de contraseñas débiles, tipo de token, rate limiting y fail-open ante caída de Redis
 ---
 
-# Security Tests
+# Tests de seguridad
 
-Contenido en desarrollo para Security Tests.
+> [!NOTE]
+> Esta es una funcionalidad experimental que aún está en desarrollo activo.
+> No hay tests de seguridad implementados todavía. Esta página describe los
+> casos previstos.
+
+Los tests de seguridad verifican que los mecanismos de protección de GEMA se
+comportan correctamente tanto en condiciones normales como en escenarios
+límite o de fallo.
+
+## Contraseñas débiles
+
+Cada regla de validación de `PlainPassword` se prueba individualmente para
+confirmar el código de error y el mensaje:
+
+```python
+class TestWeakPasswordErrors:
+    @pytest.mark.asyncio
+    async def test_short_password_returns_weak_password_error(
+        self, client
+    ):
+        payload = {
+            "data": {
+                "type": "users",
+                "attributes": {
+                    "email": "user@example.com",
+                    "password": "Sh@rt1",
+                },
+            }
+        }
+        response = await client.post(
+            "/v1/auth/register",
+            json=payload,
+            headers={
+                "Content-Type": "application/vnd.api+json",
+                "Accept": "application/vnd.api+json",
+            },
+        )
+        assert response.status_code == 422
+        assert response.json()["errors"][0]["code"] == \
+            "ERR_WEAK_PASSWORD"
+
+    @pytest.mark.asyncio
+    async def test_password_without_uppercase(self, client):
+        # similar, probando cada regla individual
+        ...
+
+    @pytest.mark.asyncio
+    async def test_password_without_number(self, client):
+        ...
+
+    @pytest.mark.asyncio
+    async def test_password_without_special_char(self, client):
+        ...
+```
+
+## Validación de tipo de token
+
+```python
+class TestTokenTypeValidation:
+    @pytest.mark.asyncio
+    async def test_refresh_token_rejected_at_me_endpoint(
+        self, client, auth_tokens
+    ):
+        """Un token de refresco no debe funcionar en /me."""
+        refresh_token = auth_tokens["refresh_token"]
+
+        response = await client.get(
+            "/v1/auth/me",
+            headers={
+                "Authorization": f"Bearer {refresh_token}",
+                "Accept": "application/vnd.api+json",
+            },
+        )
+        assert response.status_code == 401
+        assert response.json()["errors"][0]["code"] == \
+            "ERR_INVALID_TOKEN"
+
+    @pytest.mark.asyncio
+    async def test_access_token_rejected_at_refresh_endpoint(
+        self, client, auth_tokens
+    ):
+        """Un token de acceso no debe funcionar en /refresh."""
+        access_token = auth_tokens["access_token"]
+        payload = {
+            "data": {
+                "type": "tokens",
+                "attributes": {"refresh_token": access_token},
+            }
+        }
+
+        response = await client.post(
+            "/v1/auth/refresh",
+            json=payload,
+            headers={
+                "Content-Type": "application/vnd.api+json",
+                "Accept": "application/vnd.api+json",
+            },
+        )
+        assert response.status_code == 401
+```
+
+## Rate limiting
+
+```python
+class TestRateLimiting:
+    @pytest.mark.asyncio
+    async def test_login_rate_limit_exceeded(self, client):
+        payload = {
+            "data": {
+                "type": "tokens",
+                "attributes": {
+                    "email": "any@example.com",
+                    "password": "AnyPass@1",
+                },
+            }
+        }
+        headers = {
+            "Content-Type": "application/vnd.api+json",
+            "Accept": "application/vnd.api+json",
+        }
+
+        # 5 solicitudes deben pasar (límite de login)
+        for _ in range(5):
+            response = await client.post(
+                "/v1/auth/login", json=payload, headers=headers
+            )
+
+        # La sexta debe ser rechazada
+        response = await client.post(
+            "/v1/auth/login", json=payload, headers=headers
+        )
+        assert response.status_code == 429
+        assert response.json()["errors"][0]["code"] == \
+            "ERR_TOO_MANY_REQUESTS"
+```
+
+> [!WARNING]
+> El test de rate limiting depende de que las solicitudes compartan la misma
+> IP. Con `httpx.AsyncClient` y `ASGITransport`, `request.client.host` puede
+> ser `"127.0.0.1"` o `"test"`. Ajusta la extracción de IP en el test o
+> configura el cliente para que envíe `X-Forwarded-For`.
+
+## Fail-open en Redis
+
+```python
+class TestFailOpen:
+    @pytest.mark.asyncio
+    async def test_rate_limit_allows_request_when_redis_down(
+        self, client, monkeypatch
+    ):
+        """Si Redis no responde, el middleware debe permitir la solicitud."""
+
+        async def failing_script(*args, **kwargs):
+            raise RedisError("Connection refused")
+
+        monkeypatch.setattr(
+            "app.presentation.middlewares.rate_limit.rate_limit_script",
+            failing_script,
+        )
+
+        # La solicitud debe pasar aunque Redis falle
+        payload = {
+            "data": {
+                "type": "tokens",
+                "attributes": {
+                    "email": "any@example.com",
+                    "password": "AnyPass@1",
+                },
+            }
+        }
+        response = await client.post(
+            "/v1/auth/login",
+            json=payload,
+            headers={
+                "Content-Type": "application/vnd.api+json",
+                "Accept": "application/vnd.api+json",
+            },
+        )
+        # No debe ser 429 aunque exceda el límite
+        assert response.status_code != 429
+```
+
+## Revocación de tokens
+
+```python
+class TestTokenRevocation:
+    @pytest.mark.asyncio
+    async def test_logout_revokes_access_token(
+        self, client, auth_tokens
+    ):
+        access_token = auth_tokens["access_token"]
+
+        # Cerrar sesión
+        logout_resp = await client.post(
+            "/v1/auth/logout",
+            headers={
+                "Authorization": f"Bearer {access_token}",
+                "Content-Type": "application/vnd.api+json",
+                "Accept": "application/vnd.api+json",
+            },
+        )
+        assert logout_resp.status_code == 204
+
+        # El mismo token ya no funciona
+        me_resp = await client.get(
+            "/v1/auth/me",
+            headers={
+                "Authorization": f"Bearer {access_token}",
+                "Accept": "application/vnd.api+json",
+            },
+        )
+        assert me_resp.status_code == 401
+
+    @pytest.mark.asyncio
+    async def test_refresh_rotation_revokes_old_token(
+        self, client, auth_tokens
+    ):
+        refresh_token = auth_tokens["refresh_token"]
+
+        # Primer refresco — funciona
+        refresh_payload = {
+            "data": {
+                "type": "tokens",
+                "attributes": {"refresh_token": refresh_token},
+            }
+        }
+        resp1 = await client.post(
+            "/v1/auth/refresh",
+            json=refresh_payload,
+            headers={
+                "Content-Type": "application/vnd.api+json",
+                "Accept": "application/vnd.api+json",
+            },
+        )
+        assert resp1.status_code == 200
+
+        # Segundo refresco con el mismo token — debe fallar
+        resp2 = await client.post(
+            "/v1/auth/refresh",
+            json=refresh_payload,
+            headers={
+                "Content-Type": "application/vnd.api+json",
+                "Accept": "application/vnd.api+json",
+            },
+        )
+        assert resp2.status_code == 401
+```
+
+## Cómo ejecutar los tests
+
+```bash
+# Tests de seguridad (incluidos en e2e)
+pytest tests/e2e/ -v -k "security or rate_limit or token"
+
+# Tests específicos de rate limiting
+pytest tests/e2e/ -v -k "rate_limit"
+```
+
+## Próximos pasos
+
+- Revisa la documentación de [autenticación](../security/authentication) para
+  entender los mecanismos que se prueban aquí.
+- Consulta [OWASP](../security/owasp) para el mapeo completo de seguridad.

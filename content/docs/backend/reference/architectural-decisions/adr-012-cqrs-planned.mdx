@@ -1,0 +1,31 @@
+---
+title: ADR-012 — CQRS como funcionalidad planeada
+description: Segregación de comandos y consultas diferida para cuando el sistema lo requiera.
+---
+
+# ADR-012: CQRS como funcionalidad planeada/experimental
+
+- **Estado:** Planeado
+- **Fecha:** 2026-05-18
+
+## Contexto
+
+Actualmente no hay necesidad de separar lecturas y escrituras en modelos distintos. Los casos de uso son lo suficientemente simples como para que command y query convivan en la misma clase.
+
+## Decisión
+
+No implementar CQRS aún, pero documentarlo como patrón disponible para cuando el sistema crezca. Señales para migrar a CQRS:
+
+- Cuando un modelo de lectura difiera significativamente del modelo de escritura
+- Cuando la carga de lecturas justifique cachés o proyecciones específicas
+- Cuando los casos de uso de consulta superen en complejidad a los de comando
+
+## Consecuencias
+
+- Los casos de uso actuales mezclan commands y queries sin problemas
+- Si la complejidad aumenta, se puede migrar a CQRS sin cambios estructurales mayores porque los puertos ya están separados por dominio
+- La migración consistiría en separar `RegisterUserCommand` de `GetUserQuery`
+
+## Referencias
+
+- [CQRS](../application/cqrs)

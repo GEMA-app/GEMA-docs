@@ -1,0 +1,35 @@
+---
+title: ADR-001 — Arquitectura hexagonal con puertos Protocol
+description: Separación de dominio, aplicación e infraestructura mediante typing.Protocol.
+---
+
+# ADR-001: Arquitectura hexagonal con puertos basados en Protocol
+
+- **Estado:** Aceptado
+- **Fecha:** 2026-05-18
+
+## Contexto
+
+Necesitábamos separar la lógica de negocio de los detalles técnicos (base de datos, Redis, hashing, JWT) para poder testear y cambiar implementaciones sin afectar el dominio.
+
+## Decisión
+
+Usar arquitectura hexagonal (puertos y adaptadores) donde:
+
+- `domain/` es Python puro, sin dependencias externas
+- `application/` define contratos como `typing.Protocol` (duck typing, sin herencia explícita)
+- `infrastructure/` implementa esos protocolos
+- `presentation/` (FastAPI) recibe dependencias inyectadas desde el contenedor, nunca instancia infraestructura directamente
+
+## Consecuencias
+
+- Cualquier clase que cumpla el protocolo es compatible sin acoplarse a una clase base
+- Los casos de uso se inyectan vía `composition/container.py` con `Depends()` de FastAPI
+- Cambiar de PostgreSQL a MySQL o de PyJWT a python-jose solo requiere un nuevo adapter
+- El dominio es testeable sin infraestructura real
+
+## Referencias
+
+- [Principios arquitectónicos](../architecture/principles)
+- [Visión general de capas](../architecture/layers-overview)
+- [Contenedor de dependencias](../architecture/composition-root)

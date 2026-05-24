@@ -1,0 +1,38 @@
+---
+title: ADR-011 — Domain exceptions mapeadas a HTTP en presentación
+description: Separación entre errores de negocio y su representación HTTP.
+---
+
+# ADR-011: Domain exceptions mapeadas a HTTP en presentación
+
+- **Estado:** Aceptado
+- **Fecha:** 2026-05-18
+
+## Contexto
+
+El dominio no debe conocer códigos HTTP. Mezclar errores de negocio con su representación HTTP viola la separación de capas y dificulta reusar el dominio en otros contextos (CLI, eventos, tests).
+
+## Decisión
+
+El dominio lanza excepciones específicas (`InvalidTokenError`, `UserInactiveError`, etc.). Un exception handler global en la capa de presentación las mapea a códigos HTTP y formato JSON:API.
+
+| Excepción | Error Code | HTTP Status |
+|-----------|-----------|-------------|
+| `WeakPasswordError` | `ERR_WEAK_PASSWORD` | 422 |
+| `InvalidEmailError` | `ERR_INVALID_EMAIL` | 422 |
+| `UserAlreadyExistsError` | `ERR_USER_ALREADY_EXISTS` | 409 |
+| `InvalidCredentialsError` | `ERR_INVALID_CREDENTIALS` | 401 |
+| `UserInactiveError` | `ERR_USER_INACTIVE` | 403 |
+| `InvalidTokenError` | `ERR_INVALID_TOKEN` | 401 |
+| (Pydantic validation) | `ERR_VALIDATION` | 422 |
+
+## Consecuencias
+
+- Single Responsibility: el dominio expresa problemas de negocio, la presentación decide cómo mostrarlos
+- Las excepciones pueden reintentarse o traducirse según el contexto (CLI, API, worker)
+- La tabla de mapeo está centralizada en `exception_handlers.py`
+
+## Referencias
+
+- [Exception handlers](../presentation/exception-handlers)
+- [Excepciones de dominio](../domain/exceptions)
