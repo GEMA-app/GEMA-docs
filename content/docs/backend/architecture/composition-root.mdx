@@ -1,8 +1,115 @@
 ---
-title: Composition Root
-description: Documentación sobre Composition Root
+title: Raíz de composición
+description: El contenedor de dependencias y cómo se conectan las capas
 ---
 
-# Composition Root
+Esta página explica cómo se instancian y conectan los adaptadores de infraestructura con los casos de uso, y cómo los endpoints acceden a ellos sin acoplarse.
 
-Contenido en desarrollo para Composition Root.
+Al centralizar la creación de dependencias en un único punto, facilitas el mantenimiento del código, evitas la duplicación de lógica de inicialización y simplificas la creación de pruebas unitarias mediante dobles de prueba (mocks).
+
+## ¿Qué es la raíz de composición?
+
+En una arquitectura hexagonal hay un solo lugar donde se crean los objetos concretos y se inyectan a las clases que los necesitan. Este lugar se conoce como la **raíz de composición**. En este proyecto vive en `src/app/composition/container.py`.
+
+La regla de diseño es estricta: la capa de presentación nunca debe instanciar componentes de infraestructura de forma directa. Los endpoints de FastAPI no crean repositorios, conexiones a Redis ni clientes de correo. Todo se construye en el contenedor y se proporciona mediante inyección de dependencias.
+
+> [!NOTE]
+> **Inyección de dependencias (DI):** Es el patrón de diseño donde un objeto recibe sus dependencias desde el exterior en lugar de instanciarlas internamente. El **contenedor** actúa como la factoría que orquesta y suministra estas dependencias. No pases el contenedor a las capas internas; utilízalo únicamente para la composición inicial.
+
+## El contenedor (`container.py`)
+
+Las factorías de dependencias utilizan `Depends()` de FastAPI para resolver e instanciar dinámicamente los componentes requeridos por la aplicación:
+
+```python
+# composition/container.py
+from fastapi import Depends
+from redis.asyncio import Redis
+
+from app.application.ports.auth import PasswordHasherPort, TokenServicePort
+from app.application.ports.unit_of_work import UnitOfWorkPort
+from app.application.use_cases.register_user import RegisterUserUseCase
+from app.infrastructure.cache.redis import get_redis
+from app.infrastructure.security.hashing import BcryptPasswordHasher
+from app.infrastructure.security.jwt import PyJwtTokenService
+from app.infrastructure.uow import SqlAlchemyUnitOfWork
+
+
+def get_uow() -> UnitOfWorkPort:
+    """Factoría para resolver la unidad de trabajo (Unit of Work)."""
+    return SqlAlchemyUnitOfWork()
+
+
+def get_password_hasher() -> PasswordHasherPort:
+    """Factoría para resolver el servicio de hashing."""
+    return BcryptPasswordHasher()
+
+
+async def get_token_service(redis: Redis = Depends(get_redis)) -> TokenServicePort:
+    """Factoría para resolver el servicio de tokens JWT."""
+    return PyJwtTokenService(redis)
+
+
+async def get_register_user_use_case(
+    uow: UnitOfWorkPort = Depends(get_uow),
+    hasher: PasswordHasherPort = Depends(get_password_hasher),
+    token_service: TokenServicePort = Depends(get_token_service),
+) -> RegisterUserUseCase:
+    """Factoría para construir el caso de uso de registro de usuario."""
+    return RegisterUserUseCase(uow, hasher, token_service)
+```
+
+Cada controlador (endpoint) declara sus dependencias utilizando `Depends()` apuntando a estas factorías específicas:
+
+```python
+@router.post("/auth/register")
+async def register(
+    body: RegisterRequest,
+    use_case: RegisterUserUseCase = Depends(get_register_user_use_case),
+):
+    ...
+```
+
+## Unidad de trabajo como gestor de persistencia
+
+El `SqlAlchemyUnitOfWork` implementa la interfaz `UnitOfWorkPort` y encapsula la sesión asíncrona de base de datos. En lugar de recibir una sesión activa, recibe una factoría de sesiones y crea la sesión real dentro del bloque de contexto:
+
+```python
+class SqlAlchemyUnitOfWork(UnitOfWorkPort):
+    def __init__(
+        self, session_factory: async_sessionmaker[AsyncSession] = async_session_factory
+    ) -> None:
+        self.session_factory = session_factory
+
+    async def __aenter__(self) -> Self:
+        # Crea la sesión asíncrona al ingresar al bloque context manager
+        self.session = self.session_factory()
+        # Construye el repositorio pasándole la sesión activa
+        self.users = SqlAlchemyUserRepository(self.session)
+        return self
+
+    async def __aexit__(self, exc_type: Any, exc_val: Any, tb: Any) -> None:
+        # Revierte los cambios si ocurrió una excepción antes de cerrar la sesión
+        try:
+            if exc_type is not None:
+                await self.rollback()
+        finally:
+            await self.session.close()
+
+    async def commit(self) -> None:
+        await self.session.commit()
+
+    async def rollback(self) -> None:
+        await self.session.rollback()
+```
+
+Esta estructura asegura que los repositorios utilicen la misma transacción y sesión durante toda la ejecución del caso de uso.
+
+## Próximos pasos
+
+Una vez que comprendas cómo funciona la raíz de composición, puedes continuar con la siguiente lectura:
+
+| Si quieres... | Sigue esta guía |
+|---------------|-----------------|
+| Trazar el camino de una solicitud HTTP | [Ciclo de vida de una petición](./request-lifecycle) |
+| Repasar las responsabilidades de cada capa | [Visión general de las capas](./layers-overview) |
+| Conocer los pilares de diseño del proyecto | [Principios arquitectónicos](./principles) |

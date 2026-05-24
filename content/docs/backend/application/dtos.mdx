@@ -1,8 +1,110 @@
 ---
-title: Dtos
-description: Documentación sobre Dtos
+title: DTOs (Data Transfer Objects)
+description: Objetos inmutables que transportan datos entre el endpoint y el caso de uso
 ---
 
-# Dtos
+Los DTOs transportan datos entre la presentación y los casos de uso sin
+acoplarlos. Son dataclasses puras, sin lógica de validación ni
+serialización.
 
-Contenido en desarrollo para Dtos.
+Todos viven en `src/app/application/dtos.py`.
+
+## Tabla de DTOs
+
+| DTO | Tipo | Campos |
+|---|---|---|
+| `RegisterUserRequest` | Input | `email: str`, `password: str` |
+| `LoginUserRequest` | Input | `email: str`, `password: str` |
+| `RefreshTokenRequest` | Input | `refresh_token: str` |
+| `AuthTokensDTO` | Output | `access_token: str`, `refresh_token: str`, `token_type: str` |
+| `UserResponse` | Output | `id: str`, `email: str`, `is_active: bool`, `created_at: datetime`, `updated_at: datetime` |
+
+## Código completo
+
+```python
+from dataclasses import dataclass
+from datetime import datetime
+
+
+@dataclass(frozen=True)
+class RegisterUserRequest:
+    """DTO de entrada para la solicitud de registro de usuario."""
+    email: str
+    password: str
+
+
+@dataclass(frozen=True)
+class LoginUserRequest:
+    """DTO de entrada para la solicitud de inicio de sesión."""
+    email: str
+    password: str
+
+
+@dataclass(frozen=True)
+class AuthTokensDTO:
+    """DTO de salida con los tokens de acceso y refresco."""
+    access_token: str
+    refresh_token: str
+    token_type: str = "Bearer"
+
+
+@dataclass(frozen=True)
+class UserResponse:
+    """DTO de salida con la información pública de un usuario."""
+    id: str
+    email: str
+    is_active: bool
+    created_at: datetime
+    updated_at: datetime
+
+
+@dataclass(frozen=True)
+class RefreshTokenRequest:
+    """DTO de entrada para la rotación de tokens."""
+    refresh_token: str
+```
+
+## Diferencia con schemas Pydantic
+
+Los schemas Pydantic (en `presentation/api/v1/schemas/`) validan y
+serializan el formato JSON:API de la petición HTTP. Los DTOs son el
+siguiente paso: datos ya validados, listos para el caso de uso.
+
+```
+HTTP request
+  → Schema Pydantic (valida JSON:API, Content-Type, tipos)
+    → DTO (dataclass, sin validación)
+      → Caso de uso (lógica de negocio)
+        → DTO (resultado)
+          → Schema Pydantic (serializa JSON:API)
+            → HTTP response
+```
+
+> [!NOTE]
+> `@dataclass(frozen=True)` hace que el DTO sea inmutable. Una vez creado,
+> no se puede modificar. Esto evita efectos secundarios: si el caso de uso
+> recibe un DTO, sabe que los datos no cambiarán durante la ejecución.
+
+## ¿Por qué dataclasses y no Pydantic?
+
+| Razón | Explicación |
+|---|---|
+| Sin dependencias externas | Dataclass es parte de la biblioteca estándar. El `application/` no importa Pydantic ni FastAPI. |
+| Simplicidad | Un dataclass declara campos y nada más. No hay validación, ni serialización, ni configuración. |
+| Inmutabilidad | `frozen=True` asegura que el objeto no cambia después de creado. |
+
+Si el caso de uso necesita validar datos, usa value objects del dominio:
+
+```python
+# El DTO tiene str simples
+dto = RegisterUserRequest(email="correo@test.com", password="Abc12345!")
+
+# El caso de uso crea value objects que validan
+email = Email(value=dto.email)           # valida formato
+plain_password = PlainPassword(value=dto.password)  # valida fortaleza
+```
+
+## Próximos pasos
+
+El [Unit of Work](./unit-of-work) es el mecanismo que los casos de uso
+usan para persistir los datos recibidos a través de estos DTOs.

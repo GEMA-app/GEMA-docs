@@ -1,8 +1,168 @@
 ---
-title: Request Lifecycle
-description: Documentación sobre Request Lifecycle
+title: Ciclo de vida de una petición
+description: El recorrido de una petición HTTP desde que entra hasta que sale
 ---
 
-# Request Lifecycle
+Esta página detalla el ciclo de vida completo de una petición HTTP en el backend de GEMA, desde que el servidor la recibe hasta la entrega de la respuesta al cliente.
 
-Contenido en desarrollo para Request Lifecycle.
+Comprender el flujo de ejecución te ayudará a depurar el código de manera eficiente y a ubicar correctamente los componentes en la capa que les corresponde.
+
+## Vista general del flujo
+
+A continuación se muestra el esquema del recorrido que realiza una solicitud al ingresar en el sistema, atravesando los filtros globales, el enrutador, los validadores, el caso de uso y la base de datos:
+
+```
+HTTP Request
+    ↓
+FastAPI (uvicorn)
+    ↓
+Middlewares: request_id → content_type → accept → rate_limit
+    ↓
+Router (v1)
+    ↓
+Endpoint
+    ↓
+Schema validation (Pydantic / JSON:API)
+    ↓
+DTO conversion
+    ↓
+Use Case + Unit of Work
+    ↓
+Repository
+    ↓
+Database / Cache
+    ↓
+JSON:API Response
+    ↓
+HTTP Response
+```
+
+## Paso a paso
+
+El procesamiento de una petición HTTP involucra diversas etapas donde cada capa de la arquitectura realiza una tarea específica y pasa el control a la siguiente.
+
+### 1. Recepción en FastAPI
+
+El servidor ASGI Uvicorn recibe la petición web y la transfiere a la aplicación FastAPI. Para este momento, el ciclo de vida de la aplicación (`lifespan`) ya ha inicializado el motor de base de datos y configurado los logs estructurados del sistema.
+
+### 2. Capa de middlewares
+
+Los middlewares globales interceptan la petición en el orden en que fueron registrados, permitiendo modificar las cabeceras, denegar solicitudes o inyectar identificadores:
+
+1. **`request_id`:** Genera un identificador único global (UUID) para la petición y lo añade como cabecera `X-Request-ID` a la respuesta para facilitar el rastreo.
+2. **`content_type`:** Valida que toda solicitud de modificación (`POST`, `PATCH`, `DELETE`) declare explícitamente el tipo de contenido `application/vnd.api+json` en la cabecera `Content-Type`.
+3. **`accept`:** Comprueba que la cabecera `Accept` del cliente sea compatible con la respuesta JSON:API del sistema.
+4. **`rate_limit`:** Evalúa y contabiliza la tasa de solicitudes usando Redis. Si Redis experimenta problemas de comunicación, el middleware permite el paso de la petición (fail-open).
+
+> [!NOTE]
+> **El papel de los middlewares:** Actúan como filtros interceptores que envuelven la ejecución del resto del backend, ideales para resolver requisitos globales como auditoría, seguridad o validaciones básicas de protocolo.
+
+### 3. Enrutamiento (Router)
+
+FastAPI asocia la ruta y el método HTTP con el controlador registrado en el enrutador `v1_router` (con prefijo `/v1`). Por ejemplo, la ruta `POST /v1/auth/register` mapea directamente al endpoint de registro.
+
+### 4. Controlador (Endpoint)
+
+La función del controlador recibe la petición y delega la ejecución de la lógica al caso de uso correspondiente. Este controlador se mantiene libre de bloques de captura de errores, ya que las excepciones son capturadas por manejadores globales.
+
+### 5. Validación de datos
+
+Los modelos de Pydantic analizan y validan la estructura y tipo de los datos contenidos en el cuerpo de la petición. Si la validación no tiene éxito, FastAPI retorna un error de validación `422 Unprocessable Entity` sin llegar al caso de uso.
+
+### 6. Transformación a DTO
+
+Los esquemas de entrada de Pydantic se convierten en un objeto de transferencia de datos (DTO) puro antes de invocar la capa de aplicación. Esto garantiza que la lógica de negocio no tenga dependencia directa con librerías de serialización o de red.
+
+### 7. Caso de uso y transacción (Unit of Work)
+
+El caso de uso coordina la operación abriendo una unidad de trabajo (`UnitOfWork`). Tras invocar los comportamientos del dominio y guardar los cambios a través del repositorio, ejecuta la confirmación de la transacción:
+
+```python
+async with self.uow:
+    hashed_val = self.hasher.hash(plain_password.value)
+    hashed_password = HashedPassword(value=hashed_val)
+    
+    user = User.register(email=email, hashed_password=hashed_password)
+    await self.uow.users.save(user)
+    await self.uow.commit()
+    
+    access_token = await self.token_service.generate_access_token(str(user.id))
+    refresh_token = await self.token_service.generate_refresh_token(str(user.id))
+    return AuthTokensDTO(access_token=access_token, refresh_token=refresh_token)
+```
+
+Si ocurre algún fallo en este bloque, la unidad de trabajo revierte automáticamente todas las operaciones transaccionales.
+
+### 8. Repositorio de persistencia
+
+El repositorio recibe la entidad del dominio y la traduce a los modelos de base de datos de SQLAlchemy, delegando el almacenamiento en la sesión activa compartida con la unidad de trabajo.
+
+### 9. Base de datos y caché
+
+Los cambios son persistidos de manera asíncrona en PostgreSQL o Redis (por ejemplo, para almacenar tokens revocados) mediante el uso de conexiones no bloqueantes organizadas por la librería `asyncpg`.
+
+### 10. Serialización y respuesta
+
+La capa de presentación recibe la respuesta de la aplicación, la convierte a un esquema Pydantic formateado según JSON:API y el servidor envía la respuesta HTTP correspondiente al cliente con el código de estado apropiado (por ejemplo, `201 Created`).
+
+## Ejemplo de petición completa
+
+Para ilustrar mejor el recorrido, analizaremos el flujo exacto que sigue una llamada de registro de usuario en el sistema:
+
+```json
+// Petición entrante
+POST /v1/auth/register
+Content-Type: application/vnd.api+json
+
+{
+  "data": {
+    "type": "users",
+    "attributes": {
+      "email": "dev@sigma.com",
+      "password": "ContrasenaSegura123!"
+    }
+  }
+}
+
+// Flujo interno del sistema
+1. Middleware request_id -> Inyecta el ID único de traza.
+2. Middleware content_type -> Verifica Content-Type correcto.
+3. Middleware accept -> Valida cabecera Accept.
+4. Middleware rate_limit -> Valida límite de consumo.
+5. Router -> Deriva al endpoint de registro.
+6. Endpoint -> Recibe y deserializa la solicitud en RegisterRequest.
+7. DTO -> Crea RegisterUserDto(email="dev@sigma.com", password="ContrasenaSegura123!").
+8. Caso de uso -> Invoca RegisterUserUseCase.execute(dto).
+9. Unidad de trabajo -> Abre el gestor de contexto SqlAlchemyUnitOfWork.
+10. Validaciones de dominio -> Valida contraseña débil mediante PlainPassword.
+11. Hashing -> Hashea contraseña limpia mediante bcrypt.hashpw().
+12. Entidad del dominio -> Crea una nueva entidad User.
+13. Repositorio -> Guarda el usuario temporalmente en la sesión activa.
+14. Unit of Work -> Ejecuta commit() persistiendo los cambios de forma atómica.
+15. Autenticación -> Genera tokens JWT (access y refresh) para el nuevo usuario.
+16. Cierre -> Cierra de forma segura la sesión y conexión a base de datos.
+
+// Respuesta devuelta al cliente
+HTTP 201 Created
+Content-Type: application/vnd.api+json
+
+{
+  "data": {
+    "type": "tokens",
+    "attributes": {
+      "access_token": "eyJ...",
+      "refresh_token": "eyJ..."
+    }
+  }
+}
+```
+
+## Próximos pasos
+
+Una vez que domines el ciclo de vida de una petición, puedes profundizar en los siguientes temas:
+
+| Si quieres... | Sigue esta guía |
+|---------------|-----------------|
+| Repasar las responsabilidades de cada capa | [Visión general de las capas](./layers-overview) |
+| Comprender las decisiones de diseño del backend | [Principios arquitectónicos](./principles) |
+| Conocer cómo se inicializan las dependencias | [Raíz de composición](./composition-root) |

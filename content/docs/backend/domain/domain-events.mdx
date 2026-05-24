@@ -1,8 +1,94 @@
 ---
-title: Domain Events
-description: Documentación sobre Domain Events
+title: Eventos de dominio
+description: DomainEvent, UserRegistered y UserLoggedIn, registro de lo que ocurre en el negocio
 ---
 
-# Domain Events
+Los eventos de dominio registran algo que ya ocurrió en el sistema. Son
+inmutables, tienen un identificador único y una marca de tiempo.
 
-Contenido en desarrollo para Domain Events.
+> [!NOTE]
+> Un evento de dominio describe algo que **ya pasó** (pasado). No es un
+> comando ni una instrucción. `UserRegistered` significa "el usuario ya se
+> registró", no "registra al usuario".
+
+## Clase base
+
+Vive en `src/app/domain/events.py`:
+
+```python
+@dataclass(frozen=True, kw_only=True)
+class DomainEvent:
+    """Clase base para todos los eventos de dominio."""
+    event_id: uuid.UUID = field(default_factory=uuid.uuid4)
+    occurred_on: datetime = field(
+        default_factory=lambda: datetime.now(timezone.utc)
+    )
+```
+
+Cada evento tiene un identificador único (`event_id`) que se genera
+automáticamente, y la fecha exacta en que ocurrió (`occurred_on`).
+
+## Eventos concretos
+
+```python
+@dataclass(frozen=True, kw_only=True)
+class UserRegistered(DomainEvent):
+    """Evento emitido cuando un nuevo usuario se registra."""
+    user_id: str
+    email: str
+
+
+@dataclass(frozen=True, kw_only=True)
+class UserLoggedIn(DomainEvent):
+    """Evento emitido cuando un usuario inicia sesión exitosamente."""
+    user_id: str
+    email: str
+```
+
+Ambos heredan de `DomainEvent` y agregan los datos relevantes: quién
+(`user_id`) y con qué correo (`email`).
+
+## Cómo se emiten
+
+La entidad `User` acumula eventos internamente. Los factory methods los
+crean y los agregan a la lista `_events`:
+
+```python
+# En User.register()
+user._events.append(
+    UserRegistered(user_id=str(user.id), email=user.email.value)
+)
+
+# En User.login()
+self._events.append(
+    UserLoggedIn(user_id=str(self.id), email=self.email.value)
+)
+```
+
+Para obtener los eventos pendientes, se llama a `pull_events()`:
+
+```python
+events = user.pull_events()
+# → [UserRegistered(user_id="...", email="...")]
+```
+
+La entidad devuelve los eventos y limpia la lista interna para que no se
+vuelvan a emitir.
+
+## ¿Para qué sirven?
+
+Los eventos de dominio permiten reaccionar a lo que ocurre en el negocio
+sin acoplar el código. Por ejemplo, cuando se emite `UserRegistered`:
+
+- Enviar un correo de bienvenida
+- Registrar en un sistema de analytics
+- Disparar un workflow de onboarding
+
+Esas reacciones se implementan como **suscriptores** en la capa de
+infraestructura, sin modificar el dominio.
+
+## Próximos pasos
+
+Las [Reglas de negocio](./business-rules) recopilan todas las validaciones
+que el dominio impone y que pueden producir estos eventos o sus excepciones
+correspondientes.

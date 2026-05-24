@@ -1,8 +1,84 @@
 ---
-title: Layers Overview
-description: Documentación sobre Layers Overview
+title: Visión general de las capas
+description: Domain, application, infrastructure y presentation, responsabilidades de cada capa y reglas de dependencia
 ---
 
-# Layers Overview
+Esta página describe las cuatro capas de la arquitectura hexagonal del proyecto, qué contiene cada una y cómo se relacionan entre sí.
 
-Contenido en desarrollo para Layers Overview.
+El diseño del backend de GEMA se estructura bajo los principios de desacoplamiento de la arquitectura hexagonal, garantizando que el núcleo de negocio esté aislado de los detalles tecnológicos y sea altamente mantenible.
+
+## Beneficios de la arquitectura limpia
+
+Al separar el software en capas con responsabilidades delimitadas y seguir la regla de dependencia, la base de código obtiene cualidades fundamentales para su evolución a largo plazo:
+
+- **Independencia de frameworks:** Las librerías de terceros y los frameworks como FastAPI se tratan como herramientas y no como restricciones. Puedes reemplazar o actualizar estas dependencias con un impacto mínimo en el núcleo de la aplicación.
+- **Testabilidad absoluta:** La lógica de negocio se puede probar de forma aislada, sin necesidad de interactuar con la base de datos, el servidor web, el cliente de caché o cualquier otro agente externo.
+- **Independencia de la base de datos:** El almacenamiento y la persistencia son detalles secundarios. La aplicación interactúa mediante contratos, permitiendo cambiar PostgreSQL por cualquier otro motor de base de datos sin alterar las reglas de negocio.
+- **Independencia de la interfaz:** La capa de presentación puede cambiar por completo (por ejemplo, añadir una interfaz de línea de comandos o cambiar el formato de entrega a gRPC) sin modificar los casos de uso ni el dominio.
+
+## Estructura de capas
+
+La arquitectura del proyecto se divide en círculos concéntricos donde las capas externas representan los detalles técnicos y las capas internas contienen la lógica pura del negocio.
+
+```
+presentation → application → domain
+infrastructure → application → domain
+```
+
+La regla fundamental de esta estructura es que las dependencias solo fluyen hacia el interior. El dominio no conoce la existencia de la aplicación ni de la infraestructura. La comunicación entre las capas externas e internas se realiza mediante interfaces abstractas llamadas puertos.
+
+> [!NOTE]
+> **¿Qué es un `Protocol` en Python?** Es una forma de definir interfaces estructurales utilizando tipado estático (duck typing en tiempo de compilación). Permite definir un contrato de comportamiento sin forzar la herencia explícita, facilitando el desacoplamiento entre las capas de aplicación e infraestructura.
+
+## Capa de dominio (domain)
+
+La capa de dominio representa el corazón de la aplicación y contiene la lógica de negocio más estable y de mayor nivel. Está escrita en Python puro y no tiene dependencias de base de datos, frameworks de red ni librerías de infraestructura.
+
+- **Entidades:** Objetos del negocio con una identidad única y mutable a lo largo del tiempo, encargados de ejecutar comportamientos y validar sus propias reglas de negocio (por ejemplo, `User`).
+- **Objetos de valor (value objects):** Objetos inmutables sin identidad propia que encapsulan datos y su validación (por ejemplo, `Email`, `PlainPassword`, `UserId`).
+- **Excepciones:** La jerarquía de errores específicos del dominio y del negocio que la aplicación puede lanzar (por ejemplo, `DomainException`, `WeakPasswordError`).
+- **Eventos:** Representan hechos significativos que ya ocurrieron en el dominio y que pueden interesar a otras partes del sistema (por ejemplo, `UserRegistered`, `UserLoggedIn`).
+
+## Capa de aplicación (application)
+
+La capa de aplicación implementa y coordina los casos de uso específicos del sistema. Define las acciones concretas que se pueden realizar y orquesta el flujo de datos desde los adaptadores externos hacia el dominio.
+
+- **Puertos (ports):** Contratos definidos mediante clases `Protocol` de Python que especifican qué servicios requiere la aplicación del mundo exterior (por ejemplo, `UserRepositoryPort`, `TokenServicePort`).
+- **Casos de uso (use cases):** Clases que encapsulan una operación de negocio única y dirigen a las entidades del dominio y los puertos para cumplir una tarea específica.
+- **DTOs (Data Transfer Objects):** Clases de datos simples (`dataclasses` puros) encargadas de transportar información a través de las fronteras de la aplicación, sin validaciones complejas de negocio.
+
+## Capa de infraestructura (infrastructure)
+
+La capa de infraestructura contiene las implementaciones de bajo nivel y los detalles técnicos de la aplicación. Se encarga de adaptar las herramientas externas a los puertos requeridos por la capa de aplicación.
+
+- **Configuración y utilidades:** Gestión de variables de entorno con Pydantic Settings e inicialización de logs estructurados.
+- **Acceso a datos:** Configuración del motor asíncrono de base de datos, la DeclarativeBase de SQLAlchemy y la definición de los modelos ORM de base de datos.
+- **Repositorios:** Clases que implementan los puertos de repositorio, encargadas de traducir los modelos ORM a entidades de dominio y viceversa.
+- **Seguridad:** Implementación de hashing de contraseñas con bcrypt y servicios de generación y validación de tokens JWT.
+- **Unidad de trabajo (Unit of Work):** Gestor de contexto asíncrono (`SqlAlchemyUnitOfWork`) que coordina transacciones atómicas y comparte la sesión de base de datos con los repositorios.
+
+> [!NOTE]
+> **El concepto de adaptador:** Un adaptador es una clase de infraestructura que implementa un puerto de la aplicación. Por ejemplo, `SqlAlchemyUserRepository` es el adaptador concreto para el puerto `UserRepositoryPort`. El núcleo del sistema solo se comunica a través del puerto, ignorando los detalles del adaptador.
+
+## Capa de presentación (presentation)
+
+La capa de presentación actúa como el punto de entrada para los clientes externos y la interfaz del sistema. Traduce las peticiones externas en llamadas entendibles por la capa de aplicación y devuelve la respuesta en el formato requerido.
+
+- **Rutas y endpoints:** Controladores organizados por versión encargados de recibir la petición HTTP y delegar la ejecución en el caso de uso correspondiente.
+- **Esquemas JSON:API:** Modelos de Pydantic que aseguran la validación de entrada y la serialización de salida bajo el estándar estricto JSON:API.
+- **Middlewares:** Filtros de procesamiento global como inyección de identificador de petición (`request_id`), limitación de peticiones (`rate_limit`) y validación de cabeceras HTTP.
+- **Manejadores de excepciones:** Traductores globales que interceptan excepciones de dominio y aplicación para transformarlas en respuestas de error con formato estándar JSON:API.
+
+## Raíz de composición (composition)
+
+El único lugar donde se instancian los adaptadores de infraestructura y se conectan con los casos de uso es `composition/container.py`. Los endpoints de FastAPI reciben sus dependencias mediante inyección de dependencias con `Depends()`, evitando acoplarse a clases concretas.
+
+## Próximos pasos
+
+Una vez que comprendas la visión general de las capas, te recomendamos continuar con las siguientes lecturas:
+
+| Si quieres... | Sigue esta guía |
+|---------------|-----------------|
+| Conocer los pilares de diseño del proyecto | [Principios arquitectónicos](./principles) |
+| Ver cómo se ensamblan las dependencias | [Raíz de composición](./composition-root) |
+| Trazar el camino de una solicitud HTTP | [Ciclo de vida de una petición](./request-lifecycle) |

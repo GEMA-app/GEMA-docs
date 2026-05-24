@@ -1,8 +1,80 @@
 ---
-title: Applicability Levels
-description: Documentación sobre Applicability Levels
+title: Niveles de aplicabilidad
+description: Cómo se aplican los patrones DDD según la complejidad del dominio
 ---
 
-# Applicability Levels
+No todos los módulos de un proyecto necesitan el mismo nivel de rigor en el diseño. Esta página define tres niveles de aplicabilidad para que elijas el que corresponde según la complejidad del dominio que estás modelando.
 
-Contenido en desarrollo para Applicability Levels.
+Al aplicar el nivel de diseño adecuado para cada caso de uso evitas caer en la sobreingeniería en secciones simples y garantizas el control y robustez en los flujos críticos de la plataforma.
+
+El proyecto actual opera principalmente bajo las directrices del **Nivel 2 — Dominio moderado**.
+
+## Nivel 1 — CRUD básico
+
+Este nivel se aplica a operaciones sencillas de creación, lectura, actualización y eliminación de registros que no contienen reglas de negocio ni validaciones complejas.
+
+| Aspecto | Práctica |
+|---|---|
+| Entidades | Data class simple o modelo ORM directo |
+| Value objects | Solo tipos primitivos (str, int) |
+| Eventos de dominio | No se usan |
+| Excepciones | HTTPException directamente |
+| Puertos (Ports) | Opcionales |
+| Casos de uso | Función simple o endpoint directo |
+
+Te recomendamos utilizar este nivel cuando el flujo consista únicamente en guardar o leer datos desde una tabla estática o un catálogo del sistema (por ejemplo, listar provincias o países).
+
+## Nivel 2 — Dominio moderado
+
+Este nivel se enfoca en operaciones con reglas de negocio, flujos con múltiples validaciones y varios actores involucrados. Es el estándar de desarrollo actual de GEMA Backend.
+
+| Aspecto | Práctica |
+|---|---|
+| Entidades | Clase con comportamiento e invariantes (`User`) |
+| Value objects | Objetos inmutables con validación propia (`Email`, `PlainPassword`) |
+| Eventos de dominio | Se definen y emiten (`UserRegistered`, `UserLoggedIn`) |
+| Excepciones | Jerarquía propia (`DomainException` → subclases) |
+| Puertos (Ports) | `Protocol` en `application/ports/` |
+| Casos de uso | Clases con dependencias inyectadas vía puertos |
+| Transacciones | Unit of Work como async context manager |
+
+> [!NOTE]
+> **¿Cuándo elegir este nivel?** Si necesitas validar reglas de negocio concretas antes de persistir la información (por ejemplo, validar si un usuario cumple los requisitos de registro antes de guardarlo), debes utilizar siempre el Nivel 2.
+
+## Nivel 3 — DDD completo
+
+Este nivel se reserva para dominios con una lógica altamente compleja, coordinaciones complejas de datos, consistencia eventual y flujos de negocio distribuidos.
+
+| Aspecto | Práctica |
+|---|---|
+| Entidades | Agregados con raíces y límites claros |
+| Value objects | Objetos con comportamiento e interacciones complejas |
+| Eventos de dominio | Se publican a través de un bus de eventos con manejadores desacoplados |
+| Repositorios | Interfaces puras del dominio (independientes de ORM) |
+| Factories | Creación aislada de agregados con dependencias complejas |
+| Sagas / Procesos | Coordinación y transacciones entre múltiples agregados |
+
+Aunque este nivel no se requiere en la mayoría de los módulos actuales del proyecto, la arquitectura del sistema está preparada para escalar hacia este modelo sin alterar la estructura básica del código.
+
+## Tabla comparativa de niveles
+
+La siguiente tabla resume los componentes obligatorios y opcionales que debes incorporar según el nivel de aplicabilidad seleccionado para tu módulo:
+
+| Característica | Nivel 1 (CRUD) | Nivel 2 (Moderado) | Nivel 3 (DDD) |
+|---|---|---|---|
+| Value objects | No | Sí | Sí |
+| Eventos de dominio | No | Sí | Sí + Bus |
+| Unit of Work | No necesario | Sí | Sí |
+| Puertos (Protocol) | Opcional | Sí | Sí |
+| Agregados | No | No | Sí |
+| Bus de eventos | No | No | Sí |
+
+## Próximos pasos
+
+Una vez que definas el nivel de aplicabilidad idóneo para tu desarrollo, te recomendamos continuar con las siguientes lecturas:
+
+| Si quieres... | Sigue esta guía |
+|---------------|-----------------|
+| Repasar las responsabilidades de cada capa | [Visión general de las capas](./layers-overview) |
+| Comprender las decisiones de diseño del backend | [Principios arquitectónicos](./principles) |
+| Conocer cómo se inicializan las dependencias | [Raíz de composición](./composition-root) |

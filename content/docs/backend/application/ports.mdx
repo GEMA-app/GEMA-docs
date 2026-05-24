@@ -1,8 +1,150 @@
 ---
-title: Ports
-description: Documentación sobre Ports
+title: Puertos (Ports)
+description: Protocolos que definen los contratos entre la aplicación y la infraestructura
 ---
 
-# Ports
+Los puertos (ports) son los contratos que la capa de aplicación define para
+comunicarse con el mundo exterior. La infraestructura los implementa
+mediante adaptadores.
 
-Contenido en desarrollo para Ports.
+Todos viven en `src/app/application/ports/` y se definen como `Protocol` de
+Python.
+
+> [!NOTE]
+> Usamos `typing.Protocol` en lugar de clases base abstractas (ABC) porque
+> Protocol usa **duck typing**: cualquier clase que tenga los métodos
+> declarados es compatible automáticamente, sin necesidad de herencia
+> explícita. Esto desacopla aún más la aplicación de la infraestructura.
+
+## `UserRepositoryPort`
+
+Archivo: `src/app/application/ports/repository.py`
+
+Define cómo se persisten y consultan los usuarios. El dominio solo conoce
+este Protocol, no la base de datos.
+
+```python
+class UserRepositoryPort(Protocol):
+
+    async def save(self, user: User) -> None:
+        ...
+
+    async def get_by_email(self, email: Email) -> Optional[User]:
+        ...
+
+    async def get_by_id(self, id: UserId) -> Optional[User]:
+        ...
+```
+
+| Método | Recibe | Devuelve |
+|---|---|---|
+| `save` | `User` | `None` |
+| `get_by_email` | `Email` | `Optional[User]` |
+| `get_by_id` | `UserId` | `Optional[User]` |
+
+> [!WARNING]
+> `save()` persiste en la sesión pero **no hace commit**. El commit lo hace
+> exclusivamente el Unit of Work.
+
+## `PasswordHasherPort`
+
+Archivo: `src/app/application/ports/auth.py`
+
+```python
+class PasswordHasherPort(Protocol):
+
+    def hash(self, password: str) -> str:
+        ...
+
+    def verify(self, password: str, hashed_password: str) -> bool:
+        ...
+```
+
+| Método | Recibe | Devuelve |
+|---|---|---|
+| `hash` | contraseña texto plano | hash string |
+| `verify` | texto plano + hash | booleano |
+
+## `TokenServicePort`
+
+Archivo: `src/app/application/ports/auth.py`
+
+```python
+class TokenServicePort(Protocol):
+
+    async def generate_access_token(self, subject: str) -> str:
+        ...
+
+    async def generate_refresh_token(self, subject: str) -> str:
+        ...
+
+    async def decode_token(self, token: str) -> dict[str, Any]:
+        ...
+
+    async def revoke_token(self, jti: str, exp: int) -> None:
+        ...
+```
+
+| Método | Recibe | Devuelve |
+|---|---|---|
+| `generate_access_token` | `subject` (User ID como string) | JWT string |
+| `generate_refresh_token` | `subject` (User ID como string) | JWT string |
+| `decode_token` | JWT string | `dict` con claims (`sub`, `exp`, `jti`, `type`) |
+| `revoke_token` | `jti` + timestamp de expiración | `None` |
+
+El `subject` siempre es un string (`UserId.__str__()`). Nunca un `uuid.UUID`
+directo.
+
+## `UnitOfWorkPort`
+
+Archivo: `src/app/application/ports/unit_of_work.py`
+
+```python
+class UnitOfWorkPort(Protocol):
+
+    users: UserRepositoryPort
+
+    async def __aenter__(self) -> Self:
+        ...
+
+    async def __aexit__(self, exc_type: Any, exc_val: Any, tb: Any) -> None:
+        ...
+
+    async def commit(self) -> None:
+        ...
+
+    async def rollback(self) -> None:
+        ...
+```
+
+El UoW expone `users` como atributo. Esto permite a los casos de uso
+acceder al repositorio dentro de una transacción:
+
+```python
+async with self.uow:
+    await self.uow.users.save(user)
+    await self.uow.commit()
+```
+
+Ver la página [Unit of Work](./unit-of-work) para más detalle sobre cómo
+funciona.
+
+## Relación entre puertos
+
+```
+Casos de uso
+  → dependen de UnitOfWorkPort
+    → UnitOfWorkPort.users es UserRepositoryPort
+  → dependen de PasswordHasherPort
+  → dependen de TokenServicePort
+```
+
+Los casos de uso nunca dependen de implementaciones concretas. Solo conocen
+estos Protocol. La infraestructura (`SqlAlchemyUserRepository`,
+`BcryptPasswordHasher`, `PyJwtTokenService`, `SqlAlchemyUnitOfWork`)
+implementa los Protocol sin que la aplicación lo sepa.
+
+## Próximos pasos
+
+Los [Casos de uso](./use-cases) consumen estos puertos. Léelos para ver
+cómo se inyectan y se usan en cada operación.

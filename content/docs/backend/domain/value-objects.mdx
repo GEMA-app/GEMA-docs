@@ -1,8 +1,124 @@
 ---
-title: Value Objects
-description: Documentación sobre Value Objects
+title: Value objects
+description: Email, PlainPassword, HashedPassword y UserId, inmutables y auto-validados
 ---
 
-# Value Objects
+Los value objects encapsulan datos con su propia validación. Son inmutables,
+no tienen identidad propia y dos instancias con el mismo valor se consideran
+iguales.
 
-Contenido en desarrollo para Value Objects.
+Los cuatro value objects del proyecto viven en
+`src/app/domain/value_objects.py`.
+
+## Tabla comparativa
+
+| Value object | Validación | Se usa en |
+|---|---|---|
+| `Email` | Formato regex | `User.email` |
+| `PlainPassword` | 8+ chars, mayúscula, número, especial | Antes de hashear |
+| `HashedPassword` | No vacío | `User.hashed_password` |
+| `UserId` | UUID válido | `User.id`, JWT subject |
+
+## `Email`
+
+```python
+@dataclass(frozen=True)
+class Email:
+    value: str
+
+    def __post_init__(self) -> None:
+        if not self.value or not isinstance(self.value, str):
+            raise InvalidEmailError("El correo electrónico no puede estar vacío.")
+        pattern = r"^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$"
+        if not re.match(pattern, self.value):
+            raise InvalidEmailError(
+                f"El correo electrónico '{self.value}' tiene un formato inválido."
+            )
+```
+
+Valida el formato con una expresión regular. Si el correo no cumple, lanza
+`InvalidEmailError`.
+
+## `PlainPassword`
+
+```python
+@dataclass(frozen=True)
+class PlainPassword:
+    value: str
+
+    def __post_init__(self) -> None:
+        if not self.value or len(self.value) < 8:
+            raise WeakPasswordError(
+                "La contraseña debe tener al menos 8 caracteres."
+            )
+        if not re.search(r"[A-Z]", self.value):
+            raise WeakPasswordError(
+                "La contraseña debe contener al menos una letra mayúscula."
+            )
+        if not re.search(r"\d", self.value):
+            raise WeakPasswordError(
+                "La contraseña debe contener al menos un número."
+            )
+        if not re.search(r"[!@#$%^&*(),.?\":{}|<>\-_]", self.value):
+            raise WeakPasswordError(
+                "La contraseña debe contener al menos un carácter especial."
+            )
+```
+
+Valida la fortaleza de la contraseña **antes** de que llegue al hasher. Si
+no cumple todas las reglas, lanza `WeakPasswordError`.
+
+> [!NOTE]
+> `PlainPassword` solo existe en el momento de registro o login. Nunca se
+> persiste. Una vez que pasa la validación, se hashea con bcrypt y el
+> resultado se guarda como `HashedPassword`.
+
+## `HashedPassword`
+
+```python
+@dataclass(frozen=True)
+class HashedPassword:
+    value: str
+
+    def __post_init__(self) -> None:
+        if not self.value or not isinstance(self.value, str):
+            raise ValueError("El hash de la contraseña no puede estar vacío.")
+```
+
+Solo verifica que el hash no esté vacío. El hash ya fue generado por bcrypt
+antes de crear este value object.
+
+## `UserId`
+
+```python
+@dataclass(frozen=True)
+class UserId:
+    value: uuid.UUID
+
+    def __str__(self) -> str:
+        return str(self.value)
+
+    @classmethod
+    def from_string(cls, user_id_str: str) -> "UserId":
+        try:
+            return cls(value=uuid.UUID(user_id_str))
+        except ValueError:
+            raise ValueError(
+                f"El identificador '{user_id_str}' no es un UUID válido."
+            )
+```
+
+Envuelve un `uuid.UUID`. Necesita `__str__()` porque JSON:API espera los
+IDs como string, y `from_string()` para reconstruir el VO desde un string.
+
+> [!NOTE]
+> Los value objects usan `@dataclass(frozen=True)`. Esto los hace
+> inmutables: después de creados, no se pueden modificar. Si necesitas un
+> valor diferente, creas una instancia nueva. La validación ocurre en
+> `__post_init__()`, que Python ejecuta automáticamente después de
+> `__init__`.
+
+## Próximos pasos
+
+Lee [Excepciones de dominio](./exceptions) para ver qué errores lanzan
+estos value objects y cómo se traducen a respuestas HTTP.

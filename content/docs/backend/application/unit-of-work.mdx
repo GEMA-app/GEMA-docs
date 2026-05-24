@@ -1,8 +1,124 @@
 ---
-title: Unit Of Work
-description: Documentación sobre Unit Of Work
+title: Unit of Work
+description: Puerto y frontera transaccional, commit, rollback y repositorios
 ---
 
-# Unit Of Work
+El Unit of Work (UoW) agrupa varias operaciones de base de datos en una
+sola transacción. Garantiza que los cambios se persistan por completo o se
+deshagan por completo.
 
-Contenido en desarrollo para Unit Of Work.
+## El puerto
+
+El contrato se define en `src/app/application/ports/unit_of_work.py`:
+
+```python
+class UnitOfWorkPort(Protocol):
+
+    users: UserRepositoryPort
+
+    async def __aenter__(self) -> Self:
+        ...
+
+    async def __aexit__(
+        self, exc_type: Any, exc_val: Any, tb: Any
+    ) -> None:
+        ...
+
+    async def commit(self) -> None:
+        ...
+
+    async def rollback(self) -> None:
+        ...
+```
+
+Atributos clave:
+
+- `users` — el repositorio de usuarios. El UoW lo crea internamente con la
+  misma sesión.
+- `__aenter__` y `__aexit__` — lo convierten en async context manager.
+- `commit()` — confirma la transacción.
+- `rollback()` — deshace los cambios.
+
+## Comportamiento como context manager
+
+```python
+async with self.uow:
+    await self.uow.users.save(user)
+    await self.uow.commit()
+    # si algo falla antes del commit, __aexit__ hace rollback
+```
+
+- Si todo sale bien, `__aexit__` cierra la sesión sin errores.
+- Si ocurre una excepción, `__aexit__` ejecuta `rollback()` antes de
+  propagarla.
+
+## El UoW es dueño de los repositorios
+
+La implementación concreta `SqlAlchemyUnitOfWork` (en
+`src/app/infrastructure/uow.py`) recibe una fábrica de sesiones y crea
+el repositorio internamente:
+
+```python
+class SqlAlchemyUnitOfWork(UnitOfWorkPort):
+
+    def __init__(
+        self,
+        session_factory: async_sessionmaker[AsyncSession] = async_session_factory,
+    ) -> None:
+        self.session_factory = session_factory
+
+    async def __aenter__(self) -> Self:
+        self.session = self.session_factory()
+        self.users = SqlAlchemyUserRepository(self.session)
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, tb) -> None:
+        try:
+            if exc_type is not None:
+                await self.rollback()
+        finally:
+            await self.session.close()
+
+    async def commit(self) -> None:
+        await self.session.commit()
+
+    async def rollback(self) -> None:
+        await self.session.rollback()
+```
+
+No se inyecta la sesión al repositorio y al UoW por separado. El UoW crea
+ambos con la misma sesión, garantizando que compartan la misma transacción.
+
+> [!WARNING]
+> El repositorio **nunca** hace `session.commit()`. Solo usa
+> `session.add()` o `session.merge()`. El `commit()` es responsabilidad
+> exclusiva del UoW. Si un repositorio hiciera commit, rompería la
+> frontera transaccional.
+
+## Uso en casos de uso
+
+```python
+async with self.uow:
+    user = User.register(email=email, hashed_password=hashed_password)
+    await self.uow.users.save(user)
+    await self.uow.commit()
+    # eventos de dominio se podrían publicar aquí
+```
+
+El caso de uso toma el UoW, opera sobre `uow.users` (que es el repositorio)
+y llama a `commit()`. No maneja sesiones, no abre conexiones, no hace
+rollback manual.
+
+## ¿Por qué el UoW en lugar de una sesión directa?
+
+| Sin UoW | Con UoW |
+|---|---|
+| El caso de uso conoce `AsyncSession` | El caso de uso solo conoce `UnitOfWorkPort` |
+| Cada caso de uso debe acordarse de hacer commit/rollback | El context manager lo hace automático |
+| Difícil cambiar de ORM | Cambia solo la implementación del UoW |
+| El repositorio podría recibir una sesión diferente a la del commit | El UoW garantiza misma sesión para todo |
+
+## Próximos pasos
+
+[CQRS](./cqrs) es un patrón que complementa al UoW separando operaciones
+de lectura y escritura. Está planeado para fases futuras del proyecto.

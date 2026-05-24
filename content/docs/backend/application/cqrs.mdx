@@ -1,8 +1,86 @@
 ---
-title: Cqrs
-description: Documentación sobre Cqrs
+title: CQRS
+description: Segregación de responsabilidad de comandos y consultas (planeado)
 ---
 
-# Cqrs
+> [!NOTE]
+> Esta es una funcionalidad planeada que aún no está implementada. El
+> contenido describe hacia dónde se dirige la arquitectura.
 
-Contenido en desarrollo para Cqrs.
+CQRS (Command Query Responsibility Segregation) propone separar las
+operaciones que **modifican** el estado (commands) de las que solo **leen**
+el estado (queries).
+
+## Estado actual
+
+El proyecto no implementa CQRS. Los casos de uso mezclan comandos y
+consultas en una misma clase. Por ejemplo, `LoginUserUseCase` lee al
+usuario, modifica su estado (`login()`) y devuelve datos. Esto funciona
+bien para el nivel actual de complejidad (Nivel 2 — dominio moderado).
+
+```
+UseCase actual (mezclado)
+  → recibe DTO
+  → lee de la base de datos
+  → ejecuta lógica de negocio
+  → escribe en la base de datos
+  → devuelve DTO
+```
+
+## Cómo sería con CQRS
+
+```
+Command (escribe)
+  → RegisterUserCommand → handler → UoW → evento
+
+Query (lee)
+  → GetUserQuery → handler → lector (sin UoW) → DTO
+```
+
+| Aspecto | Command | Query |
+|---|---|---|
+| Modifica estado | Sí | No |
+| Usa UoW | Sí | No |
+| Puede emitir eventos | Sí | No |
+| Puede cachear resultado | No recomendado | Sí |
+| Puede usar modelo diferente | Sí | Sí (modelo de lectura separado) |
+
+## ¿Cuándo tendría sentido?
+
+CQRS es útil cuando:
+
+- El modelo de lectura es muy diferente al modelo de escritura (ej: una
+  query devuelve datos agregados de múltiples tablas).
+- Necesitas escalar la lectura y la escritura por separado.
+- Tienes múltiples clientes que consumen los mismos datos en formatos
+  distintos.
+
+Si el proyecto actual solo lee y escribe el mismo modelo (`User`), CQRS
+agrega complejidad sin beneficio. La decisión de adoptarlo se toma cuando
+aparezca una necesidad real de diferenciar lectura de escritura.
+
+## Relación con la arquitectura actual
+
+La arquitectura hexagonal actual ya prepara el terreno para CQRS:
+
+- Los **puertos** separan la lógica de la infraestructura. Un puerto de
+  lectura (`UserQueryPort`) sería independiente del puerto de escritura
+  (`UserRepositoryPort`).
+- Los **casos de uso** ya actúan como comandos. Las queries serían clases
+  separadas sin UoW.
+- Los **eventos de dominio** (`UserRegistered`, `UserLoggedIn`) permitirían
+  actualizar un modelo de lectura eventualmente consistente.
+
+```
+Estado actual:            Con CQRS:
+RegisterUserUseCase       RegisterUserCommand → handler → UoW → evento
+  (command + query)         → proyector actualiza modelo de lectura
+GetCurrentUserUseCase     GetUserQuery → handler → query model → DTO
+  (command + query)
+```
+
+## Próximos pasos
+
+Vuelve a la [Visión general de las capas](../architecture/layers-overview)
+para repasar cómo encajan estos conceptos en la arquitectura completa del
+proyecto.

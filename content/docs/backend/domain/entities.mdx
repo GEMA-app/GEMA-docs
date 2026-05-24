@@ -1,8 +1,114 @@
 ---
-title: Entities
-description: Documentación sobre Entities
+title: Entidades
+description: La entidad User, identidad, propiedades, comportamiento e invariantes
 ---
 
-# Entities
+Esta página explica cómo se implementa la entidad `User`, qué invariantes
+mantiene y cómo se comporta.
 
-Contenido en desarrollo para Entities.
+## ¿Qué es una entidad?
+
+Una entidad es un objeto del dominio que tiene **identidad propia**. Dos
+entidades con los mismos atributos pero diferente identidad son objetos
+distintos. En este proyecto la única entidad es `User`.
+
+> [!NOTE]
+> La diferencia clave entre una entidad y un value object es la identidad.
+> `User` es entidad porque importa **quién** es (UserId). `Email` es value
+> object porque importa **qué** valor tiene, no quién lo posee.
+
+## La entidad `User`
+
+Vive en `src/app/domain/entities.py`:
+
+```python
+from app.domain.exceptions import UserInactiveError
+from app.domain.value_objects import Email, HashedPassword, UserId
+from app.domain.events import DomainEvent, UserLoggedIn, UserRegistered
+
+
+class User:
+    """Entidad de dominio rica que representa a un usuario en el sistema."""
+
+    def __init__(
+        self,
+        id: UserId,
+        email: Email,
+        hashed_password: HashedPassword,
+        is_active: bool = True,
+        created_at: Optional[datetime] = None,
+        updated_at: Optional[datetime] = None,
+    ) -> None:
+        self.id = id
+        self.email = email
+        self.hashed_password = hashed_password
+        self.is_active = is_active
+        self.created_at = created_at or datetime.now(timezone.utc)
+        self.updated_at = updated_at or datetime.now(timezone.utc)
+        self._events: list[DomainEvent] = []
+
+    @classmethod
+    def register(cls, email: Email, hashed_password: HashedPassword) -> "User":
+        user_id = UserId(value=uuid.uuid4())
+        user = cls(
+            id=user_id, email=email, hashed_password=hashed_password,
+            is_active=True,
+        )
+        user._events.append(
+            UserRegistered(user_id=str(user.id), email=user.email.value)
+        )
+        return user
+
+    def login(self) -> None:
+        if not self.is_active:
+            raise UserInactiveError(
+                f"El usuario {self.email.value} está inactivo."
+            )
+        self._events.append(
+            UserLoggedIn(user_id=str(self.id), email=self.email.value)
+        )
+
+    def pull_events(self) -> list[DomainEvent]:
+        events = self._events.copy()
+        self._events.clear()
+        return events
+```
+
+## Constructor vs factory method
+
+| Vía | Cuándo usarla |
+|---|---|
+| `User.__init__()` | Cuando reconstruyes un usuario desde la base de datos. El repositorio llama a `User(...)` con todos los valores existentes. |
+| `User.register()` | Cuando creas un usuario nuevo. Genera un `UserId` automáticamente, asigna `is_active=True` y emite `UserRegistered`. |
+
+El constructor es bajo nivel: asigna propiedades sin validar el contexto.
+El factory method `register()` asegura que un usuario nuevo siempre
+arranque activo y emita su evento de registro.
+
+## Invariantes
+
+Las invariantes son condiciones que siempre se cumplen:
+
+- Un usuario inactivo **no puede** iniciar sesión. `User.login()` lanza
+  `UserInactiveError` si `is_active` es `False`.
+- El email de un usuario **siempre** es un `Email` válido (se valida en el
+  value object).
+- La contraseña almacenada **siempre** es un `HashedPassword` (nunca texto
+  plano).
+
+## Eventos que emite
+
+La entidad acumula eventos internamente y los expone mediante
+`pull_events()`. Cada llamada devuelve los eventos pendientes y limpia la
+lista interna.
+
+| Método | Evento que emite |
+|---|---|
+| `User.register()` | `UserRegistered` |
+| `User.login()` | `UserLoggedIn` |
+
+## Próximos pasos
+
+Los [Value objects](./value-objects) son los componentes que usa `User`
+como propiedades. Léelos para entender las validaciones de email,
+contraseña y UUID.

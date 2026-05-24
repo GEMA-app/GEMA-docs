@@ -1,8 +1,102 @@
 ---
-title: Data Model
-description: Documentación sobre Data Model
+title: Modelo de datos del dominio
+description: Entidades, value objects, eventos y excepciones del modelo de negocio
 ---
 
-# Data Model
+Esta página describe todos los elementos que componen el modelo de datos del
+dominio y cómo se relacionan entre sí.
 
-Contenido en desarrollo para Data Model.
+## ¿Qué es la capa de dominio?
+
+Es el núcleo del proyecto. No importa nada de FastAPI, SQLAlchemy, Redis ni
+ninguna biblioteca externa. Solo contiene código puro de Python con las
+reglas de negocio, las validaciones y los eventos que ocurren en el sistema.
+
+> [!NOTE]
+> La capa de dominio es la única que no tiene dependencias. Puedes extraer
+> toda la carpeta `domain/` a un proyecto aparte y seguiría funcionando sin
+> cambios. Eso es lo que la hace tan valiosa: las reglas de negocio no se
+> contaminan con detalles técnicos.
+
+## Componentes del dominio
+
+### Entidad `User`
+
+Es la pieza central. Tiene identidad propia (un `UserId` como UUID),
+propiedades (`email`, `hashed_password`, `is_active`) y comportamiento
+(`register()`, `login()`, `pull_events()`).
+
+```
+User
+├── id: UserId            ← value object
+├── email: Email          ← value object
+├── hashed_password: HashedPassword  ← value object
+├── is_active: bool
+├── created_at: datetime
+├── updated_at: datetime
+└── _events: list[DomainEvent]
+    ├── UserRegistered
+    └── UserLoggedIn
+```
+
+### Value objects
+
+Son objetos inmutables que encapsulan validación. No tienen identidad
+propia: dos value objects con el mismo valor son iguales.
+
+| Value object | Valida |
+|---|---|
+| `Email` | Formato de correo electrónico (regex) |
+| `PlainPassword` | Fortaleza: 8+ caracteres, 1 mayúscula, 1 número, 1 especial |
+| `HashedPassword` | No vacío (el hash ya está generado) |
+| `UserId` | UUID válido, conversión a string y desde string |
+
+### Eventos de dominio
+
+Registran lo que ocurre en el negocio. Son inmutables y llevan un
+identificador único y la fecha en que ocurrieron.
+
+- `UserRegistered` — se emite cuando un usuario se registra
+- `UserLoggedIn` — se emite cuando un usuario inicia sesión
+
+### Excepciones de dominio
+
+Jerarquía de errores que el dominio puede lanzar. Cada una se traduce a un
+código HTTP específico en la capa de presentación.
+
+```
+DomainException
+└── AuthException
+    ├── WeakPasswordError       → 422
+    ├── InvalidEmailError        → 422
+    ├── UserAlreadyExistsError   → 409
+    ├── InvalidCredentialsError  → 401
+    ├── UserInactiveError        → 403
+    └── InvalidTokenError        → 401
+```
+
+## Relaciones entre componentes
+
+```
+Petición HTTP
+  → Schema Pydantic (presentación)
+    → DTO (aplicación)
+      → Caso de uso (aplicación)
+        → User.register() (dominio)
+          → Email(value=...)
+          → PlainPassword(value=...)
+          → HashedPassword(value=...)
+          → UserId(value=uuid4())
+          → UserRegistered(user_id, email)
+        → uow.users.save(user) (infra)
+        → uow.commit()
+```
+
+El dominio solo crea value objects y entidades. El caso de uso orquesta
+quién los persiste.
+
+## Próximos pasos
+
+Lee [Entidades](./entities) para ver cómo se implementa `User`, o
+[Value objects](./value-objects) para entender las validaciones encapsuladas
+en cada uno.

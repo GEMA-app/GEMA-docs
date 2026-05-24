@@ -1,8 +1,233 @@
 ---
-title: Use Cases
-description: Documentación sobre Use Cases
+title: Casos de uso
+description: RegisterUser, LoginUser, RefreshToken, LogoutUser y GetCurrentUser
 ---
 
-# Use Cases
+Los casos de uso orquestan las operaciones del sistema. Reciben un DTO de
+entrada, ejecutan la lógica usando los puertos y devuelven un DTO de salida.
 
-Contenido en desarrollo para Use Cases.
+Todos viven en `src/app/application/use_cases/`.
+
+## Tabla de casos de uso
+
+| Caso de uso | Método `execute()` | Recibe | Devuelve | ¿Usa UoW? |
+|---|---|---|---|---|
+| `RegisterUserUseCase` | `async def execute(self, request: RegisterUserRequest)` | DTO con email y password | `AuthTokensDTO` | Sí |
+| `LoginUserUseCase` | `async def execute(self, request: LoginUserRequest)` | DTO con email y password | `AuthTokensDTO` | Sí |
+| `RefreshTokenUseCase` | `async def execute(self, request: RefreshTokenRequest)` | DTO con refresh token | `AuthTokensDTO` | Sí |
+| `LogoutUserUseCase` | `async def execute(self, access_token: str)` | token string | `None` | No |
+| `GetCurrentUserUseCase` | `async def execute(self, access_token: str)` | token string | `UserResponse` | Sí |
+
+## Estructura común
+
+Todos siguen el mismo patrón:
+
+```python
+class XxxUseCase:
+    def __init__(self, port1: Port1, port2: Port2) -> None:
+        self.port1 = port1
+        self.port2 = port2
+
+    async def execute(self, request: XxxRequest) -> XxxResponse:
+        # 1. Validar (usar value objects del dominio)
+        # 2. Operar (usar UoW, repositorio, servicios)
+        # 3. Retornar DTO
+```
+
+## `RegisterUserUseCase`
+
+```python
+class RegisterUserUseCase:
+    def __init__(
+        self, uow: UnitOfWorkPort, hasher: PasswordHasherPort,
+        token_service: TokenServicePort,
+    ) -> None:
+        self.uow = uow
+        self.hasher = hasher
+        self.token_service = token_service
+
+    async def execute(self, request: RegisterUserRequest) -> AuthTokensDTO:
+        email = Email(value=request.email)
+        plain_password = PlainPassword(value=request.password)
+
+        async with self.uow:
+            existing = await self.uow.users.get_by_email(email)
+            if existing:
+                raise UserAlreadyExistsError(
+                    f"El correo '{request.email}' ya está registrado."
+                )
+
+            hashed_val = self.hasher.hash(plain_password.value)
+            hashed_password = HashedPassword(value=hashed_val)
+
+            user = User.register(email=email, hashed_password=hashed_password)
+            await self.uow.users.save(user)
+            await self.uow.commit()
+
+            access_token = await self.token_service.generate_access_token(
+                str(user.id)
+            )
+            refresh_token = await self.token_service.generate_refresh_token(
+                str(user.id)
+            )
+            return AuthTokensDTO(
+                access_token=access_token, refresh_token=refresh_token
+            )
+```
+
+Flujo: valida con VOs → verifica duplicado → hashea → crea entidad →
+persiste → genera tokens.
+
+## `LoginUserUseCase`
+
+```python
+class LoginUserUseCase:
+    def __init__(
+        self, uow: UnitOfWorkPort, hasher: PasswordHasherPort,
+        token_service: TokenServicePort,
+    ) -> None:
+        self.uow = uow
+        self.hasher = hasher
+        self.token_service = token_service
+
+    async def execute(self, request: LoginUserRequest) -> AuthTokensDTO:
+        email = Email(value=request.email)
+
+        async with self.uow:
+            user = await self.uow.users.get_by_email(email)
+            if not user:
+                raise InvalidCredentialsError("Credenciales inválidas.")
+
+            if not self.hasher.verify(
+                request.password, user.hashed_password.value
+            ):
+                raise InvalidCredentialsError("Credenciales inválidas.")
+
+            user.login()
+            await self.uow.users.save(user)
+            await self.uow.commit()
+
+            access_token = await self.token_service.generate_access_token(
+                str(user.id)
+            )
+            refresh_token = await self.token_service.generate_refresh_token(
+                str(user.id)
+            )
+            return AuthTokensDTO(
+                access_token=access_token, refresh_token=refresh_token
+            )
+```
+
+Usa el mismo mensaje de error para email no encontrado y contraseña
+incorrecta. Esto evita filtrar qué usuarios existen.
+
+## `RefreshTokenUseCase`
+
+```python
+class RefreshTokenUseCase:
+    def __init__(
+        self, uow: UnitOfWorkPort, token_service: TokenServicePort,
+    ) -> None:
+        self.uow = uow
+        self.token_service = token_service
+
+    async def execute(self, request: RefreshTokenRequest) -> AuthTokensDTO:
+        claims = await self.token_service.decode_token(request.refresh_token)
+
+        if claims.get("type") != "refresh":
+            raise InvalidTokenError(
+                "El token no es un token de refresco válido."
+            )
+
+        jti = claims["jti"]
+        exp = claims["exp"]
+        sub = claims["sub"]
+
+        await self.token_service.revoke_token(jti=jti, exp=exp)
+
+        async with self.uow:
+            user = await self.uow.users.get_by_id(
+                UserId.from_string(sub)
+            )
+            if not user or not user.is_active:
+                raise UserInactiveError(
+                    "El usuario no existe o está inactivo."
+                )
+
+            access_token = await self.token_service.generate_access_token(
+                str(user.id)
+            )
+            refresh_token = await self.token_service.generate_refresh_token(
+                str(user.id)
+            )
+            return AuthTokensDTO(
+                access_token=access_token, refresh_token=refresh_token
+            )
+```
+
+Revoca el refresh token anterior **antes** de emitir el nuevo. Sin esta
+rotación, un token comprometido se podría reusar indefinidamente.
+
+## `LogoutUserUseCase`
+
+```python
+class LogoutUserUseCase:
+    def __init__(self, token_service: TokenServicePort) -> None:
+        self.token_service = token_service
+
+    async def execute(self, access_token: str) -> None:
+        claims = await self.token_service.decode_token(access_token)
+
+        if claims.get("type") != "access":
+            raise InvalidTokenError(
+                "Solo se pueden revocar tokens de acceso."
+            )
+
+        jti = claims["jti"]
+        exp = claims["exp"]
+        await self.token_service.revoke_token(jti=jti, exp=exp)
+```
+
+No necesita UoW porque solo opera sobre Redis (la blocklist). Decodifica el
+token y marca su JTI como revocado.
+
+## `GetCurrentUserUseCase`
+
+```python
+class GetCurrentUserUseCase:
+    def __init__(
+        self, uow: UnitOfWorkPort, token_service: TokenServicePort,
+    ) -> None:
+        self.uow = uow
+        self.token_service = token_service
+
+    async def execute(self, access_token: str) -> UserResponse:
+        claims = await self.token_service.decode_token(access_token)
+
+        if claims.get("type") != "access":
+            raise InvalidTokenError(
+                "Se requiere un token de acceso válido."
+            )
+
+        async with self.uow:
+            user = await self.uow.users.get_by_id(
+                UserId.from_string(claims["sub"])
+            )
+            if not user or not user.is_active:
+                raise UserInactiveError(
+                    "El usuario no existe o está inactivo."
+                )
+
+            return UserResponse(
+                id=str(user.id),
+                email=user.email.value,
+                is_active=user.is_active,
+                created_at=user.created_at,
+                updated_at=user.updated_at,
+            )
+```
+
+## Próximos pasos
+
+Los [DTOs](./dtos) son los objetos que los casos de uso reciben y
+devuelven. Léelos para entender el formato de cada operación.

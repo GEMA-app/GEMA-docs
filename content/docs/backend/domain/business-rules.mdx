@@ -1,8 +1,78 @@
 ---
-title: Business Rules
-description: Documentación sobre Business Rules
+title: Reglas de negocio
+description: Validaciones que la capa de dominio impone antes de permitir una operación
 ---
 
-# Business Rules
+Esta página recopila todas las reglas de negocio del proyecto, dónde se
+aplican y qué ocurre cuando se violan.
 
-Contenido en desarrollo para Business Rules.
+## Tabla de reglas
+
+| # | Regla | Ubicación | Consecuencia |
+|---|---|---|---|
+| 1 | El email debe tener formato `usuario@dominio.ext` | `Email.__post_init__` | `InvalidEmailError` → 422 |
+| 2 | La contraseña debe tener al menos 8 caracteres | `PlainPassword.__post_init__` | `WeakPasswordError` → 422 |
+| 3 | La contraseña debe contener al menos una mayúscula | `PlainPassword.__post_init__` | `WeakPasswordError` → 422 |
+| 4 | La contraseña debe contener al menos un número | `PlainPassword.__post_init__` | `WeakPasswordError` → 422 |
+| 5 | La contraseña debe contener al menos un carácter especial | `PlainPassword.__post_init__` | `WeakPasswordError` → 422 |
+| 6 | No se puede registrar un email duplicado | `RegisterUserUseCase.execute()` | `UserAlreadyExistsError` → 409 |
+| 7 | Un usuario inactivo no puede iniciar sesión | `User.login()` | `UserInactiveError` → 403 |
+| 8 | Las credenciales deben coincidir con un usuario existente | `LoginUserUseCase.execute()` | `InvalidCredentialsError` → 401 |
+| 9 | El token JWT debe ser válido, no expirado y no revocado | `PyJwtTokenService.decode_token()` | `InvalidTokenError` → 401 |
+| 10 | `JWT_SECRET_KEY` debe tener 32+ caracteres en producción | `settings.py` (Pydantic validator) | Error de arranque |
+
+## Reglas de validación de value objects
+
+Las reglas 1 a 5 se aplican automáticamente al crear el value object.
+No puedes tener una instancia de `Email` o `PlainPassword` que no cumpla
+las reglas. Esto se llama **fail fast**: el error se detecta lo antes
+posible, ni siquiera llega al caso de uso.
+
+```python
+email = Email(value="invalido")        # → InvalidEmailError
+password = PlainPassword(value="123")  # → WeakPasswordError
+```
+
+> [!WARNING]
+> Las reglas de negocio viven en el dominio, no en la base de datos ni en
+> la presentación. No uses restricciones CHECK de PostgreSQL ni validación
+> Pydantic para reglas de negocio. El dominio es el único responsable de
+> decir qué está permitido y qué no.
+
+## Reglas de orquestación
+
+Las reglas 6 a 9 se aplican en los casos de uso porque necesitan consultar
+el estado del sistema (¿ya existe ese email? ¿coincide el hash?). No pueden
+vivir en el dominio porque necesitan un repositorio.
+
+```python
+# En RegisterUserUseCase
+existing = await self.uow.users.get_by_email(email)
+if existing:
+    raise UserAlreadyExistsError(
+        f"El correo '{request.email}' ya está registrado."
+    )
+```
+
+## Reglas de configuración
+
+La regla 10 se aplica al arrancar la aplicación. No es una regla del
+dominio de autenticación, pero protege el sistema completo:
+
+```python
+# En settings.py — validación de producción
+@field_validator("JWT_SECRET_KEY")
+@classmethod
+def validate_secret_key(cls, v: str, info: ValidationInfo) -> str:
+    if info.data.get("APP_ENV") == "production" and len(v) < 32:
+        raise ValueError(
+            "JWT_SECRET_KEY debe tener al menos 32 caracteres en producción."
+        )
+    return v
+```
+
+## Próximos pasos
+
+Ahora que conoces el dominio, usa la guía
+[Crear un nuevo endpoint API](../workflows/create-api-endpoint) para poner
+estas reglas en acción dentro de un endpoint nuevo.

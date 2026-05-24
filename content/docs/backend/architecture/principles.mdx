@@ -1,8 +1,225 @@
 ---
-title: Principles
-description: Documentación sobre Principles
+title: Principios arquitectónicos
+description: Inversión de dependencias, Unit of Work, JSON:API y estrategias de tolerancia a fallos
 ---
 
-# Principles
+Esta página recopila las decisiones de diseño más importantes del proyecto, sus justificaciones técnicas y los patrones arquitectónicos que sustentan GEMA Backend.
 
-Contenido en desarrollo para Principles.
+Establecer principios claros nos permite mantener una base de código coherente y predecible a medida que el equipo y el sistema crecen en tamaño y complejidad.
+
+## Inversión de dependencias
+
+Para desacoplar el núcleo de negocio de la infraestructura tecnológica, la capa de aplicación define contratos (puertos) y la capa de infraestructura los implementa. La capa de dominio permanece completamente aislada y ajena a estas implementaciones:
+
+```
+src/app/application/ports/repository.py  →  UserRepositoryPort (Protocol)
+src/app/infrastructure/repositories/     →  SqlAlchemyUserRepository(UserRepositoryPort)
+```
+
+Los puertos se definen mediante clases `Protocol` de Python. Cualquier clase que cumpla con los métodos y firmas del puerto es compatible de forma estructural, sin necesidad de heredar directamente de la clase base.
+
+> [!NOTE]
+> **El principio de inversión de dependencias (DIP):** Establece que los módulos de alto nivel no deben depender de módulos de bajo nivel; ambos deben depender de abstracciones. En nuestro proyecto, las abstracciones se definen en la capa de aplicación como puertos y las implementaciones de bajo nivel en la infraestructura como adaptadores.
+
+<details>
+<summary>Detalles técnicos e historia del patrón</summary>
+
+El principio de inversión de dependencias (DIP) fue formulado por Robert C. Martin («Uncle Bob») a finales de la década de 1990 y se consolidó como la última de las reglas de diseño de los principios SOLID.
+
+En el software estructurado tradicional, los módulos con la lógica de negocio dependían de los detalles técnicos de bajo nivel. Si cambiabas la persistencia o el proveedor de correo, el código de negocio se rompía.
+
+Al invertir la dependencia mediante interfaces (`Protocol` en Python), las dependencias del código fuente apuntan siempre hacia el interior del sistema (el dominio). El flujo de ejecución continúa invocando a la base de datos en tiempo de ejecución, pero la lógica de negocio permanece protegida y es independiente de la base de datos elegida.
+
+</details>
+
+## Unidad de trabajo como frontera transaccional
+
+El puerto `UnitOfWorkPort` es un gestor de contexto asíncrono (`async context manager`) que administra el ciclo de vida de las transacciones de base de datos y expone los repositorios asociados:
+
+```python
+async with self.uow:
+    # Ambos repositorios comparten la misma sesión de base de datos
+    self.uow.users.save(user)
+    self.uow.logs.create(log_entry)
+    
+    # Confirmación explícita de la transacción
+    await self.uow.commit()
+    # Si ocurre un error dentro del bloque, __aexit__ ejecuta rollback automático
+```
+
+La implementación `SqlAlchemyUnitOfWork` instancia los repositorios compartiendo una misma sesión de base de datos activa. Esto asegura la atomicidad de las operaciones y evita la inyección individual de sesiones en múltiples repositorios.
+
+> [!WARNING]
+> **Responsabilidad del commit:** Los repositorios individuales nunca deben realizar un commit en la base de datos (por ejemplo, `session.commit()`). Su única responsabilidad es añadir o eliminar entidades del contexto de persistencia. La confirmación o reversión es competencia exclusiva de la unidad de trabajo (UoW).
+
+<details>
+<summary>Detalles técnicos e historia del patrón</summary>
+
+El patrón Unit of Work fue documentado por Martin Fowler en su obra *Patterns of Enterprise Application Architecture* (2002).
+
+En los inicios del desarrollo web, los repositorios solían abrir y cerrar sus propias conexiones de forma independiente. Si una acción del usuario requería actualizar sus datos y, al mismo tiempo, guardar un log de auditoría, un error en la escritura del log provocaba que los datos quedaran inconsistentes.
+
+La unidad de trabajo resuelve este problema al agrupar bajo una única transacción de base de datos todos los cambios realizados en una petición HTTP. En Python moderno, se implementa mediante gestores de contexto asíncronos (`async with`) para que la sesión de SQLAlchemy se inicialice, se confirme o se revierta de forma automática, lo que asegura la atomicidad de las operaciones.
+
+</details>
+
+## Data Mapper para el desacoplamiento de persistencia
+
+El patrón Data Mapper separa las entidades del dominio de los esquemas de base de datos. En GEMA Backend, la infraestructura implementa esta traducción en los repositorios, evitando acoplar el dominio a SQLAlchemy:
+
+```python
+# Correcto:
+class SqlAlchemyUserRepository(UserRepositoryPort):
+    def save(self, user: User) -> None:
+        # Traduce la entidad de dominio a un modelo ORM de SQLAlchemy
+        orm_user = UserOrm.from_domain(user)
+        self._session.add(orm_user)
+```
+
+```python
+# Incorrecto:
+class User(Base):  # Hereda de SQLAlchemy Base
+    # El dominio depende directamente del ORM y de la base de datos
+    __tablename__ = "users"
+    email = Column(String)
+```
+
+<details>
+<summary>Detalles técnicos e historia del patrón</summary>
+
+El patrón Data Mapper también fue definido por Martin Fowler en su catálogo de patrones en 2002.
+
+Su creación sirvió de alternativa al patrón Active Record (utilizado en frameworks como Django o Ruby on Rails), en el que una misma clase representa tanto las reglas de negocio como las columnas de la tabla física. Active Record funciona muy bien en proyectos simples (CRUD), pero dificulta las pruebas unitarias y acopla la lógica de negocio al motor de base de datos.
+
+Data Mapper introduce un componente intermedio que traduce los datos entre los objetos de dominio (puros) y los modelos del ORM. De este modo, la entidad `User` de tu dominio no sabe qué es una tabla ni qué ORM se utiliza, lo que permite cambiar el esquema físico sin alterar la lógica de negocio.
+
+</details>
+
+## Domain Factory para la creación de entidades
+
+El patrón Domain Factory encapsula la instanciación de entidades y objetos de valor complejos. Esto asegura que ningún objeto del dominio se cree en un estado inválido o inconsistente:
+
+```python
+# Correcto:
+class UserFactory:
+    @staticmethod
+    def create_pending_verification(email: Email, password: HashedPassword) -> User:
+        # Crea la entidad en un estado inicial válido con valores por defecto consistentes
+        return User(
+            id=UserId.generate(),
+            email=email,
+            password=password,
+            status=UserStatus.PENDING_VERIFICATION,
+            roles=["member"]
+        )
+```
+
+```python
+# Incorrecto:
+# Crear la entidad de forma directa dispersando la lógica de inicialización por los controladores o casos de uso
+user = User(id=uuid4(), email="dev@sigma.com", status="pending")
+```
+
+<details>
+<summary>Detalles técnicos e historia del patrón</summary>
+
+El patrón Factory para el diseño de software tradicional proviene del catálogo original de *Design Patterns* del *Gang of Four* (GoF, 1994). Sin embargo, en el contexto de Domain-Driven Design (DDD), Eric Evans (2003) redefinió la Factory para resolver la creación de entidades y agregados complejos.
+
+Crear una entidad con múltiples campos y valores por defecto puede dispersar la lógica de inicialización en múltiples partes del código. Si el estado por defecto de un usuario registrado cambia de «activo» a «pendiente», tendrías que modificar cada endpoint que cree usuarios. La Domain Factory centraliza estas reglas para asegurar que un objeto del dominio nazca siempre en un estado consistente y válido.
+
+</details>
+
+## Domain Events y preparación para el patrón Outbox
+
+Las entidades del dominio registran eventos para notificar cambios significativos en su estado. Estos eventos se almacenan localmente en la entidad, quedando listos para ser persistidos en la misma transacción mediante el patrón Transactional Outbox:
+
+```python
+# Correcto:
+class User:
+    def __init__(self, ...):
+        self._domain_events: list[DomainEvent] = []
+
+    def register(self) -> None:
+        # Registra el evento internamente en la entidad
+        self._domain_events.append(UserRegistered(user_id=self.id))
+
+    def collect_events(self) -> list[DomainEvent]:
+        # Permite extraer los eventos acumulados para su procesamiento u outbox
+        events = list(self._domain_events)
+        self._domain_events.clear()
+        return events
+```
+
+```python
+# Incorrecto:
+# Publicar el evento directamente en un bus externo (como Kafka o RabbitMQ) desde el dominio o caso de uso antes de asegurar que la transacción de base de datos se confirme con éxito.
+```
+
+<details>
+<summary>Detalles técnicos e historia del patrón</summary>
+
+Los eventos de dominio se popularizaron con la llegada de Domain-Driven Design (DDD). Representan sucesos relevantes para el negocio que ya han ocurrido (por ejemplo, «usuario registrado» o «pago recibido»).
+
+En arquitecturas distribuidas, notificar estos eventos a otros sistemas (como microservicios o colas de mensajería) es un problema clásico. Si envías un evento directamente a RabbitMQ o Kafka dentro del código de negocio, pero la transacción de base de datos falla al final, los demás servicios procesarán una acción ficticia.
+
+El patrón Transactional Outbox resuelve esto mediante la consistencia eventual. En lugar de despachar el evento al exterior directamente, la transacción de base de datos guarda el evento en una tabla especial llamada `outbox`. Un proceso secundario asíncrono (un *relay* o *publisher*) lee de forma constante esa tabla y despacha los eventos pendientes al bus de mensajería, de modo que todo cambio de estado confirmado se propague sin excepciones.
+
+</details>
+
+## Validación estricta de configuración
+
+Para evitar comportamientos inesperados en diferentes entornos de ejecución, la configuración del sistema gestionada mediante Pydantic Settings utiliza la restricción `extra="forbid"`. Cualquier variable de entorno declarada que no esté explícitamente tipada en `settings.py` detendrá el arranque de la aplicación de inmediato.
+
+En entornos de producción, se aplican comprobaciones de seguridad adicionales. Por ejemplo, el sistema no iniciará si la clave secreta `JWT_SECRET_KEY` tiene una longitud inferior a 32 caracteres o conserva el valor por defecto configurado para desarrollo.
+
+## JSON:API como contrato de comunicación
+
+El backend expone sus recursos bajo la especificación estricta de [JSON:API](https://jsonapi.org/). Esta decisión de diseño impone reglas claras tanto para el cliente como para el servidor:
+
+- **Validación de tipo de contenido:** Todas las peticiones con cuerpo de datos (`POST`, `PATCH`, `DELETE`) deben incluir la cabecera `Content-Type: application/vnd.api+json`. Si la opción `STRICT_JSONAPI` está desactivada, el sistema acepta `application/json` como alternativa. De lo contrario, responderá con un código `415 Unsupported Media Type`.
+- **Negociación de contenido:** El cliente debe indicar que acepta respuestas del tipo `application/vnd.api+json` mediante la cabecera `Accept`. En modo estricto, si la cabecera no es compatible, el sistema retornará un código `406 Not Acceptable`. Si `STRICT_JSONAPI` está en `false`, se permite `application/json` como fallback para clientes legacy.
+- **Estructura homogénea de errores:** Todas las respuestas de error siguen el estándar de JSON:API, proporcionando detalles precisos del fallo en un array `errors`, con punteros específicos al origen del error (`source.pointer`).
+
+## Tolerancia a fallos en el límite de peticiones (fail-open)
+
+El middleware de limitación de tasa de solicitudes (*rate limiting*) utiliza Redis para contabilizar los accesos mediante scripts Lua atómicos. Si el servidor de Redis no está disponible o experimenta latencias de red, el middleware aplica una estrategia *fail-open*, permitiendo el tráfico y registrando el incidente en los logs:
+
+```python
+try:
+    await self.rate_limiter.check_limit(client_ip)
+except RedisError as error:
+    # Fail-open: Permitimos el paso de la petición y registramos el fallo
+    logger.error("rate_limiter_redis_unavailable", error=error)
+    return await call_next(request)
+```
+
+> [!NOTE]
+> **Estrategias fail-open vs fail-closed:** Una arquitectura *fail-open* prioriza la disponibilidad del servicio permitiendo operaciones críticas si un componente secundario falla. Una estrategia *fail-closed* bloquea todo acceso por motivos de seguridad. En GEMA Backend preferimos mantener el servicio HTTP disponible ante fallos temporales de la caché de Redis.
+
+## Gestión segura de tokens JWT
+
+El identificador de usuario (`subject`) en el payload del JWT se almacena siempre como una representación en texto plano del UUID (`UserId.__str__()`). Durante el proceso de autenticación y lectura del token, el valor del payload se reconstruye en su objeto de valor correspondiente mediante `UserId.from_string(payload["sub"])`.
+
+Para la revocación de sesiones, el identificador único del token (`jti`) se almacena en la caché de Redis. Este registro se configura con un tiempo de vida (TTL) calculado de forma dinámica: `token.exp - datetime.utcnow()`. Esto asegura que los tokens revocados expiren automáticamente de la memoria de Redis, evitando el consumo ilimitado de recursos.
+
+## Validación de datos en el dominio
+
+Para garantizar la integridad y evitar estados inconsistentes en la persistencia, las contraseñas se validan dentro de la capa del dominio antes de ser procesadas por el algoritmo de hasheo.
+
+La contraseña recibida en formato de texto plano se transforma en un objeto de valor `PlainPassword`, el cual valida internamente los requisitos mínimos de seguridad (como longitud, presencia de mayúsculas, números y caracteres especiales). Una vez validada la fortaleza de la contraseña, el sistema procede a generar el hash mediante `bcrypt`, resultando en un objeto de valor inmutable `HashedPassword`.
+
+```
+Texto plano (str) ──> PlainPassword (Validación) ──> bcrypt ──> HashedPassword
+```
+
+Si la contraseña no cumple con las reglas mínimas del dominio, se lanza una excepción de negocio `WeakPasswordError`, la cual es capturada por el exception handler global y devuelta al cliente como una respuesta de error JSON:API bien estructurada.
+
+## Próximos pasos
+
+Una vez que comprendas los principios arquitectónicos, puedes continuar con las siguientes lecturas:
+
+| Si quieres... | Sigue esta guía |
+|---------------|-----------------|
+| Ajustar el rigor de diseño según tu módulo | [Niveles de aplicabilidad](./applicability-levels) |
+| Ver cómo se instancian y acoplan los componentes | [Raíz de composición](./composition-root) |
+| Analizar el ciclo de vida de las solicitudes HTTP | [Ciclo de vida de una petición](./request-lifecycle) |
