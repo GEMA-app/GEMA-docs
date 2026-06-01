@@ -1,0 +1,1456 @@
+---
+title: Modelo de datos
+description: Esquema de base de datos de GEMA. SaaS multitenant con PostgreSQL, enums nativos, timestamps automáticos y firmas digitales en órdenes de trabajo. Todos los esquemas representados interactivamente.
+---
+
+# Modelo de datos GEMA
+
+Este documento describe el esquema de base de datos de GEMA. Sigue un patrón multitenant con esquema compartido: todas las tablas de inquilino llevan `empresa_id` para aislar los datos de cada cliente, con políticas RLS a nivel de base de datos.
+
+---
+
+## Enums del sistema
+
+GEMA define seis enums nativos de PostgreSQL para garantizar integridad referencial a nivel de base de datos.
+
+<TypeTable
+  type={{
+    estado_activo: {
+      type: 'enum',
+      description: 'Estados del ciclo de vida de un activo (operativo, en_mantenimiento, fuera_de_servicio, dado_de_baja).'
+    },
+    tipo_mantenimiento: {
+      type: 'enum',
+      description: 'Clasificación del mantenimiento (preventivo, correctivo, predictivo).'
+    },
+    estado_orden_trabajo: {
+      type: 'enum',
+      description: 'Estados del ciclo de una orden de trabajo (abierta, en_proceso, pausada, cerrada, cancelada).'
+    },
+    tipo_ubicacion: {
+      type: 'enum',
+      description: 'Niveles jerárquicos de ubicación (sede, planta, area, seccion).'
+    },
+    modulo_permiso: {
+      type: 'enum',
+      description: 'Módulos del sistema para el RBAC (activos, mantenimiento, inventario, reportes, administracion).'
+    },
+    estado_empresa: {
+      type: 'enum',
+      description: 'Estados de la cuenta de un cliente (activa, suspendida, cancelada).'
+    },
+    prioridad_nivel: {
+      type: 'enum',
+      description: 'Nivel de urgencia de reportes de fallas (critica, alta, media, baja).'
+    },
+    estado_reporte: {
+      type: 'enum',
+      description: 'Estados de procesamiento de un reporte de falla (pendiente, en_proceso, atendido, descartado).'
+    }
+  }}
+/>
+
+---
+
+## Capa de plataforma
+
+Estas tablas pertenecen al SaaS y no llevan `empresa_id`. Almacenan datos globales de la plataforma.
+
+### planes_suscripcion
+
+Planes comerciales que determinan los límites de cada cliente.
+
+<TypeTable 
+  type={{
+    id: {
+      type: 'integer (PK)',
+      required: true,
+      description: 'Identificador único autoincremental de la suscripción.'
+    },
+    nombre: {
+      type: 'varchar (Unique)',
+      required: true,
+      description: 'Nombre del plan (starter, profesional, enterprise).'
+    },
+    descripcion: {
+      type: 'text',
+      description: 'Descripción de las características del plan.'
+    },
+    max_activos: {
+      type: 'integer',
+      default: 'null',
+      description: 'Cantidad máxima de activos permitidos para el plan (null = ilimitado).'
+    },
+    max_usuarios: {
+      type: 'integer',
+      default: 'null',
+      description: 'Cantidad máxima de usuarios permitidos para el plan (null = ilimitado).'
+    },
+    precio_mensual_usd: {
+      type: 'numeric(10,2)',
+      required: true,
+      description: 'Precio mensual de la suscripción.'
+    },
+    created_at: {
+      type: 'timestamp',
+      default: 'now()',
+      description: 'Fecha de creación del registro.'
+    },
+    updated_at: {
+      type: 'timestamp',
+      default: 'now()',
+      description: 'Última actualización del registro.'
+    }
+  }}
+/>
+
+### empresas
+
+Cada fila representa un cliente (inquilino) del sistema.
+
+<TypeTable
+  type={{
+    id: {
+      type: 'integer (PK)',
+      required: true,
+      description: 'Identificador único autoincremental de la empresa.'
+    },
+    plan_id: {
+      type: 'integer (FK)',
+      description: 'Referencia a planes_suscripcion.id.'
+    },
+    nombre: {
+      type: 'varchar',
+      required: true,
+      description: 'Nombre de la empresa o inquilino.'
+    },
+    slug: {
+      type: 'varchar (Unique)',
+      required: true,
+      description: 'Identificador URL-safe único (ej: pdvsa-occidente).'
+    },
+    rif: {
+      type: 'varchar',
+      description: 'RIF, NIT o equivalente de registro fiscal.'
+    },
+    email_contacto: {
+      type: 'varchar',
+      description: 'Correo electrónico de contacto principal.'
+    },
+    estado: {
+      type: 'estado_empresa',
+      default: 'activa',
+      description: 'Estado actual de la empresa en el sistema.'
+    },
+    trial_hasta: {
+      type: 'date',
+      description: 'Fecha límite del periodo de prueba (null si es de pago).'
+    },
+    created_at: {
+      type: 'timestamp',
+      default: 'now()',
+      description: 'Fecha de creación del registro.'
+    },
+    updated_at: {
+      type: 'timestamp',
+      default: 'now()',
+      description: 'Última actualización del registro.'
+    }
+  }}
+/>
+
+---
+
+## Capa de inquilino
+
+Todas las tablas siguientes incluyen `empresa_id` como clave foránea a `empresas.id`. Las restricciones `unique` son compuestas con `empresa_id` para permitir que valores idénticos existan en distintos clientes. Cada tabla tiene un índice explícito sobre `empresa_id` para garantizar el rendimiento de las consultas.
+
+---
+
+## Seguridad y accesos (RBAC)
+
+El control de acceso se basa en roles. Los permisos se definen por combinación de rol y módulo, con banderas CRUD independientes.
+
+### usuarios
+
+<TypeTable
+  type={{
+    id: {
+      type: 'integer (PK)',
+      required: true,
+      description: 'Identificador único autoincremental del usuario.'
+    },
+    empresa_id: {
+      type: 'integer (FK)',
+      required: true,
+      description: 'Referencia a la empresa (Tenant) asociada.'
+    },
+    nombre: {
+      type: 'varchar',
+      required: true,
+      description: 'Nombre completo del usuario.'
+    },
+    email: {
+      type: 'varchar',
+      required: true,
+      description: 'Correo electrónico (Único por empresa).'
+    },
+    password_hash: {
+      type: 'varchar',
+      required: true,
+      description: 'Contraseña cifrada.'
+    },
+    telefono: {
+      type: 'varchar',
+      description: 'Teléfono de contacto.'
+    },
+    activo: {
+      type: 'boolean',
+      default: 'true',
+      description: 'Indica si el usuario está habilitado para acceder al sistema.'
+    },
+    created_at: {
+      type: 'timestamp',
+      default: 'now()',
+      description: 'Fecha de creación del registro.'
+    },
+    updated_at: {
+      type: 'timestamp',
+      default: 'now()',
+      description: 'Última actualización del registro.'
+    }
+  }}
+/>
+
+Índice único: `(empresa_id, email)`
+
+### roles
+
+<TypeTable
+  type={{
+    id: {
+      type: 'integer (PK)',
+      required: true,
+      description: 'Identificador único autoincremental del rol.'
+    },
+    empresa_id: {
+      type: 'integer (FK)',
+      required: true,
+      description: 'Referencia a la empresa asociada.'
+    },
+    nombre: {
+      type: 'varchar',
+      required: true,
+      description: 'Nombre del rol (Único por empresa).'
+    },
+    descripcion: {
+      type: 'text',
+      description: 'Descripción detallada de las responsabilidades del rol.'
+    },
+    created_at: {
+      type: 'timestamp',
+      default: 'now()',
+      description: 'Fecha de creación del registro.'
+    },
+    updated_at: {
+      type: 'timestamp',
+      default: 'now()',
+      description: 'Última actualización del registro.'
+    }
+  }}
+/>
+
+Índice único: `(empresa_id, nombre)`
+
+### roles_usuarios
+
+Tabla intermedia que asigna roles a usuarios.
+
+<TypeTable
+  type={{
+    usuario_id: {
+      type: 'integer (PK, FK)',
+      required: true,
+      description: 'Referencia al usuario (usuarios.id).'
+    },
+    rol_id: {
+      type: 'integer (PK, FK)',
+      required: true,
+      description: 'Referencia al rol asignado (roles.id).'
+    },
+    created_at: {
+      type: 'timestamp',
+      default: 'now()',
+      description: 'Fecha de asignación del rol al usuario.'
+    }
+  }}
+/>
+
+### permisos
+
+Los permisos se definen por combinación de rol y módulo. Cada fila representa los privilegios CRUD de un rol sobre un módulo específico.
+
+<TypeTable
+  type={{
+    id: {
+      type: 'integer (PK)',
+      required: true,
+      description: 'Identificador único autoincremental del permiso.'
+    },
+    empresa_id: {
+      type: 'integer (FK)',
+      required: true,
+      description: 'Referencia a la empresa asociada.'
+    },
+    rol_id: {
+      type: 'integer (FK)',
+      required: true,
+      description: 'Referencia al rol asociado.'
+    },
+    modulo: {
+      type: 'modulo_permiso',
+      required: true,
+      description: 'Módulo del sistema (activos, mantenimiento, inventario, reportes, administracion).'
+    },
+    puede_ver: {
+      type: 'boolean',
+      default: 'false',
+      description: 'Permiso de lectura (Read).'
+    },
+    puede_crear: {
+      type: 'boolean',
+      default: 'false',
+      description: 'Permiso de creación (Create).'
+    },
+    puede_editar: {
+      type: 'boolean',
+      default: 'false',
+      description: 'Permiso de edición (Update).'
+    },
+    puede_eliminar: {
+      type: 'boolean',
+      default: 'false',
+      description: 'Permiso de eliminación (Delete).'
+    },
+    created_at: {
+      type: 'timestamp',
+      default: 'now()',
+      description: 'Fecha de creación del registro.'
+    },
+    updated_at: {
+      type: 'timestamp',
+      default: 'now()',
+      description: 'Última actualización del registro.'
+    }
+  }}
+/>
+
+Índice único: `(empresa_id, rol_id, modulo)`
+
+### preferencias_usuarios
+
+Guarda las preferencias visuales y de configuración de cada usuario (relación 1:1).
+
+<TypeTable
+  type={{
+    usuario_id: {
+      type: 'integer (PK, FK)',
+      required: true,
+      description: 'Relación 1:1 con el usuario (usuarios.id).'
+    },
+    empresa_id: {
+      type: 'integer (FK)',
+      required: true,
+      description: 'Referencia a la empresa asociada.'
+    },
+    tema: {
+      type: 'varchar',
+      default: 'oscuro',
+      required: true,
+      description: 'Tema visual del sistema (ej: oscuro, claro).'
+    },
+    created_at: {
+      type: 'timestamp',
+      default: 'now()',
+      description: 'Fecha de creación del registro.'
+    },
+    updated_at: {
+      type: 'timestamp',
+      default: 'now()',
+      description: 'Última actualización del registro.'
+    }
+  }}
+/>
+
+Índices: `empresa_id`
+
+---
+
+## Ubicaciones técnicas
+
+Las ubicaciones siguen una jerarquía padre-hijo. El campo `tipo` usa el enum `tipo_ubicacion` para restringir los valores posibles.
+
+### ubicaciones
+
+<TypeTable
+  type={{
+    id: {
+      type: 'integer (PK)',
+      required: true,
+      description: 'Identificador único autoincremental de la ubicación.'
+    },
+    empresa_id: {
+      type: 'integer (FK)',
+      required: true,
+      description: 'Referencia a la empresa asociada.'
+    },
+    parent_id: {
+      type: 'integer (FK)',
+      description: 'ID de la ubicación padre (null = raíz jerárquica).'
+    },
+    nombre: {
+      type: 'varchar',
+      required: true,
+      description: 'Nombre de la ubicación.'
+    },
+    tipo: {
+      type: 'tipo_ubicacion',
+      required: true,
+      description: 'Nivel jerárquico (sede, planta, area, seccion).'
+    },
+    descripcion: {
+      type: 'text',
+      description: 'Descripción o detalles adicionales.'
+    },
+    created_at: {
+      type: 'timestamp',
+      default: 'now()',
+      description: 'Fecha de creación del registro.'
+    },
+    updated_at: {
+      type: 'timestamp',
+      default: 'now()',
+      description: 'Última actualización del registro.'
+    }
+  }}
+/>
+
+---
+
+## Catálogo de activos
+
+### categorias_articulos
+
+<TypeTable
+  type={{
+    id: {
+      type: 'integer (PK)',
+      required: true,
+      description: 'Identificador único autoincremental.'
+    },
+    empresa_id: {
+      type: 'integer (FK)',
+      required: true,
+      description: 'Referencia a la empresa asociada.'
+    },
+    nombre: {
+      type: 'varchar',
+      required: true,
+      description: 'Nombre de la categoría (Único por empresa).'
+    },
+    descripcion: {
+      type: 'text',
+      description: 'Descripción de la categoría.'
+    },
+    created_at: {
+      type: 'timestamp',
+      default: 'now()',
+      description: 'Fecha de creación del registro.'
+    },
+    updated_at: {
+      type: 'timestamp',
+      default: 'now()',
+      description: 'Última actualización del registro.'
+    }
+  }}
+/>
+
+Índice único: `(empresa_id, nombre)`
+
+### articulos_catalogo
+
+<TypeTable
+  type={{
+    id: {
+      type: 'integer (PK)',
+      required: true,
+      description: 'Identificador único autoincremental del artículo.'
+    },
+    empresa_id: {
+      type: 'integer (FK)',
+      required: true,
+      description: 'Referencia a la empresa asociada.'
+    },
+    categoria_id: {
+      type: 'integer (FK)',
+      description: 'Referencia a la categoría del artículo.'
+    },
+    nombre: {
+      type: 'varchar',
+      required: true,
+      description: 'Nombre del artículo o repuesto en el catálogo.'
+    },
+    descripcion: {
+      type: 'text',
+      description: 'Descripción detallada o especificaciones.'
+    },
+    fabricante: {
+      type: 'varchar',
+      description: 'Nombre del fabricante.'
+    },
+    modelo: {
+      type: 'varchar',
+      description: 'Modelo del equipo o componente.'
+    },
+    unidad_medida: {
+      type: 'varchar',
+      description: 'Unidad de medida (ej: unidades, metros, litros).'
+    },
+    created_at: {
+      type: 'timestamp',
+      default: 'now()',
+      description: 'Fecha de creación del registro.'
+    },
+    updated_at: {
+      type: 'timestamp',
+      default: 'now()',
+      description: 'Última actualización del registro.'
+    }
+  }}
+/>
+
+### proveedores
+
+<TypeTable
+  type={{
+    id: {
+      type: 'integer (PK)',
+      required: true,
+      description: 'Identificador único autoincremental.'
+    },
+    empresa_id: {
+      type: 'integer (FK)',
+      required: true,
+      description: 'Referencia a la empresa asociada.'
+    },
+    nombre: {
+      type: 'varchar',
+      required: true,
+      description: 'Nombre o razón social del proveedor.'
+    },
+    rif: {
+      type: 'varchar',
+      description: 'Registro de información fiscal (Único por empresa).'
+    },
+    telefono: {
+      type: 'varchar',
+      description: 'Teléfono de contacto.'
+    },
+    email: {
+      type: 'varchar',
+      description: 'Correo electrónico de contacto.'
+    },
+    contacto: {
+      type: 'varchar',
+      description: 'Nombre de la persona de contacto principal.'
+    },
+    created_at: {
+      type: 'timestamp',
+      default: 'now()',
+      description: 'Fecha de registro.'
+    },
+    updated_at: {
+      type: 'timestamp',
+      default: 'now()',
+      description: 'Última actualización del registro.'
+    }
+  }}
+/>
+
+Índice único: `(empresa_id, rif)`
+
+---
+
+## Activos
+
+### activos
+
+<TypeTable
+  type={{
+    id: {
+      type: 'integer (PK)',
+      required: true,
+      description: 'Identificador único autoincremental del activo físico.'
+    },
+    empresa_id: {
+      type: 'integer (FK)',
+      required: true,
+      description: 'Referencia a la empresa asociada.'
+    },
+    articulo_id: {
+      type: 'integer (FK)',
+      required: true,
+      description: 'Referencia al artículo correspondiente del catálogo.'
+    },
+    ubicacion_id: {
+      type: 'integer (FK)',
+      description: 'Referencia a la ubicación técnica donde está instalado.'
+    },
+    serial_interno: {
+      type: 'varchar',
+      required: true,
+      description: 'Serial del fabricante o tag físico (Único por empresa).'
+    },
+    codigo_activo: {
+      type: 'varchar',
+      required: true,
+      description: 'Código interno de activo fijo asignado (Único por empresa).'
+    },
+    estado: {
+      type: 'estado_activo',
+      default: 'operativo',
+      description: 'Estado operativo del activo.'
+    },
+    fecha_adquisicion: {
+      type: 'date',
+      description: 'Fecha de compra o adquisición.'
+    },
+    valor_monetario: {
+      type: 'numeric(12,2)',
+      description: 'Valor de adquisición o monetario del activo.'
+    },
+    moneda: {
+      type: 'varchar(3)',
+      default: 'USD',
+      description: 'Divisa del valor (ej: USD, VES).'
+    },
+    created_at: {
+      type: 'timestamp',
+      default: 'now()',
+      description: 'Fecha de registro.'
+    },
+    updated_at: {
+      type: 'timestamp',
+      default: 'now()',
+      description: 'Última actualización del registro.'
+    }
+  }}
+/>
+
+Índices únicos: `(empresa_id, serial_interno)`, `(empresa_id, codigo_activo)`
+
+---
+
+## Planificación de mantenimiento preventivo
+
+Se eliminó el campo `frecuencia` (enum redundante). `intervalo_dias` es la única fuente de verdad para calcular la cadencia.
+
+### planes_mantenimiento
+
+<TypeTable
+  type={{
+    id: {
+      type: 'integer (PK)',
+      required: true,
+      description: 'Identificador único autoincremental del plan.'
+    },
+    empresa_id: {
+      type: 'integer (FK)',
+      required: true,
+      description: 'Referencia a la empresa asociada.'
+    },
+    activo_id: {
+      type: 'integer (FK)',
+      required: true,
+      description: 'Referencia al activo al que aplica el plan.'
+    },
+    tecnico_responsable_id: {
+      type: 'integer (FK)',
+      description: 'Técnico predeterminado responsable de la ejecución.'
+    },
+    nombre: {
+      type: 'varchar',
+      required: true,
+      description: 'Nombre o título descriptivo del plan.'
+    },
+    tipo: {
+      type: 'tipo_mantenimiento',
+      required: true,
+      description: 'Tipo de mantenimiento (preventivo, correctivo, predictivo).'
+    },
+    intervalo_dias: {
+      type: 'integer',
+      required: true,
+      description: 'Días entre cada ejecución (fuente única de verdad para la frecuencia).'
+    },
+    proxima_ejecucion: {
+      type: 'date',
+      required: true,
+      description: 'Fecha programada de la próxima ejecución.'
+    },
+    descripcion_tareas: {
+      type: 'text',
+      description: 'Detalle e instrucciones de las tareas a realizar.'
+    },
+    activo: {
+      type: 'boolean',
+      default: 'true',
+      description: 'Si el plan preventivo está actualmente activo.'
+    },
+    created_at: {
+      type: 'timestamp',
+      default: 'now()',
+      description: 'Fecha de creación.'
+    },
+    updated_at: {
+      type: 'timestamp',
+      default: 'now()',
+      description: 'Última actualización del registro.'
+    }
+  }}
+/>
+
+### planes_ejecuciones
+
+Tabla que vincula cada plan con las órdenes de trabajo que generó.
+
+<TypeTable
+  type={{
+    id: {
+      type: 'integer (PK)',
+      required: true,
+      description: 'Identificador único.'
+    },
+    empresa_id: {
+      type: 'integer (FK)',
+      required: true,
+      description: 'Referencia a la empresa asociada.'
+    },
+    plan_id: {
+      type: 'integer (FK)',
+      required: true,
+      description: 'Referencia al plan de mantenimiento origen.'
+    },
+    ordenes_trabajo_id: {
+      type: 'integer (FK)',
+      required: true,
+      description: 'Referencia a la Orden de Trabajo generada.'
+    },
+    fecha_ejecucion: {
+      type: 'timestamp',
+      default: 'now()',
+      description: 'Fecha y hora en que se ejecutó.'
+    },
+    observaciones: {
+      type: 'text',
+      description: 'Observaciones sobre la ejecución.'
+    },
+    created_at: {
+      type: 'timestamp',
+      default: 'now()',
+      description: 'Fecha de creación.'
+    },
+    updated_at: {
+      type: 'timestamp',
+      default: 'now()',
+      description: 'Última actualización.'
+    }
+  }}
+/>
+
+---
+
+## Reportes y órdenes de trabajo
+
+La tabla `reportes_falla` se renombró a `reportes_fallas` (plural consistente).
+
+### reportes_fallas
+
+<TypeTable
+  type={{
+    id: {
+      type: 'integer (PK)',
+      required: true,
+      description: 'Identificador único autoincremental.'
+    },
+    empresa_id: {
+      type: 'integer (FK)',
+      required: true,
+      description: 'Referencia a la empresa asociada.'
+    },
+    activo_id: {
+      type: 'integer (FK)',
+      required: true,
+      description: 'Referencia al activo afectado.'
+    },
+    reportado_por_id: {
+      type: 'integer (FK)',
+      description: 'Usuario que reportó la falla.'
+    },
+    descripcion: {
+      type: 'text',
+      required: true,
+      description: 'Descripción detallada de la anomalía o falla.'
+    },
+    prioridad: {
+      type: 'prioridad_nivel',
+      default: 'media',
+      required: true,
+      description: 'Nivel de urgencia de la falla (crítica, alta, media, baja).'
+    },
+    estado: {
+      type: 'estado_reporte',
+      default: 'pendiente',
+      required: true,
+      description: 'Estado de procesamiento (pendiente, en_proceso, atendido, descartado).'
+    },
+    fecha_reporte: {
+      type: 'timestamp',
+      default: 'now()',
+      description: 'Fecha y hora en que se reportó la falla.'
+    },
+    created_at: {
+      type: 'timestamp',
+      default: 'now()',
+      description: 'Fecha de creación.'
+    },
+    updated_at: {
+      type: 'timestamp',
+      default: 'now()',
+      description: 'Última actualización.'
+    }
+  }}
+/>
+
+### ordenes_trabajo
+
+`validado_gerencia` (boolean) se reemplazó por `validado_por_id` + `fecha_validacion` para trazabilidad de aprobaciones. `codigo_ot` es único dentro de cada empresa.
+
+<TypeTable
+  type={{
+    id: {
+      type: 'integer (PK)',
+      required: true,
+      description: 'Identificador único autoincremental.'
+    },
+    empresa_id: {
+      type: 'integer (FK)',
+      required: true,
+      description: 'Referencia a la empresa asociada.'
+    },
+    codigo_ot: {
+      type: 'varchar',
+      required: true,
+      description: 'Código legible único por empresa (ej: OT-2026-0001).'
+    },
+    activo_id: {
+      type: 'integer (FK)',
+      required: true,
+      description: 'Referencia al activo intervenido.'
+    },
+    reporte_id: {
+      type: 'integer (FK)',
+      description: 'Referencia al reporte de falla de origen (si es correctivo).'
+    },
+    plan_id: {
+      type: 'integer (FK)',
+      description: 'Referencia al plan de mantenimiento de origen (si es preventivo).'
+    },
+    supervisor_id: {
+      type: 'integer (FK)',
+      description: 'Supervisor a cargo de coordinar/aprobar la OT.'
+    },
+    tipo: {
+      type: 'tipo_mantenimiento',
+      required: true,
+      description: 'Tipo de mantenimiento.'
+    },
+    estado: {
+      type: 'estado_orden_trabajo',
+      default: 'abierta',
+      description: 'Estado del ciclo de vida de la orden.'
+    },
+    fecha_apertura: {
+      type: 'timestamp',
+      description: 'Fecha de apertura.'
+    },
+    fecha_inicio_trabajo: {
+      type: 'timestamp',
+      description: 'Fecha en que se inició el trabajo en campo.'
+    },
+    fecha_cierre: {
+      type: 'timestamp',
+      description: 'Fecha de cierre de la orden.'
+    },
+    descripcion_trabajo: {
+      type: 'text',
+      description: 'Detalle del trabajo realizado.'
+    },
+    costo_estimado: {
+      type: 'numeric(12,2)',
+      description: 'Costo total estimado.'
+    },
+    costo_real: {
+      type: 'numeric(12,2)',
+      description: 'Costo total real ejecutado.'
+    },
+    moneda: {
+      type: 'varchar(3)',
+      default: 'USD',
+      description: 'Divisa de los costos.'
+    },
+    validado_por_id: {
+      type: 'integer (FK)',
+      description: 'Firma digital: ID del usuario/gerente que validó el cierre.'
+    },
+    fecha_validacion: {
+      type: 'timestamp',
+      description: 'Firma digital: fecha y hora de la validación.'
+    },
+    created_at: {
+      type: 'timestamp',
+      default: 'now()',
+      description: 'Fecha de creación del registro.'
+    },
+    updated_at: {
+      type: 'timestamp',
+      default: 'now()',
+      description: 'Última actualización del registro.'
+    }
+  }}
+/>
+
+Índice único: `(empresa_id, codigo_ot)`
+
+### tecnicos_ordenes_trabajo
+
+Tabla intermedia que asigna técnicos a una orden de trabajo.
+
+<TypeTable
+  type={{
+    ordenes_trabajo_id: {
+      type: 'integer (PK, FK)',
+      required: true,
+      description: 'Referencia a la orden de trabajo (ordenes_trabajo.id).'
+    },
+    tecnico_id: {
+      type: 'integer (PK, FK)',
+      required: true,
+      description: 'Referencia al técnico asignado (usuarios.id).'
+    },
+    created_at: {
+      type: 'timestamp',
+      default: 'now()',
+      description: 'Fecha de registro de la asignación.'
+    }
+  }}
+/>
+
+### intervenciones_tecnicas
+
+Registra cada sesión de trabajo realizada por un técnico en el contexto de una orden de trabajo. Permite registrar las horas hombre y las tareas detalladas para el cálculo de KPIs de eficiencia.
+
+<TypeTable
+  type={{
+    id: {
+      type: 'integer (PK)',
+      required: true,
+      description: 'Identificador único autoincremental de la intervención.'
+    },
+    empresa_id: {
+      type: 'integer (FK)',
+      required: true,
+      description: 'Referencia a la empresa asociada.'
+    },
+    ordenes_trabajo_id: {
+      type: 'integer (FK)',
+      required: true,
+      description: 'Referencia a la orden de trabajo asociada.'
+    },
+    tecnico_id: {
+      type: 'integer (FK)',
+      required: true,
+      description: 'Técnico ejecutor.'
+    },
+    fecha_inicio: {
+      type: 'timestamp',
+      required: true,
+      description: 'Fecha y hora de inicio de la intervención.'
+    },
+    fecha_fin: {
+      type: 'timestamp',
+      description: 'Fecha y hora de finalización.'
+    },
+    horas_hombre: {
+      type: 'numeric(5,2)',
+      required: true,
+      description: 'Horas hombre dedicadas (base de cálculo para KPIs de eficiencia).'
+    },
+    tareas_realizadas: {
+      type: 'text',
+      required: true,
+      description: 'Detalle de las tareas operativas realizadas.'
+    },
+    created_at: {
+      type: 'timestamp',
+      default: 'now()',
+      description: 'Fecha de creación.'
+    },
+    updated_at: {
+      type: 'timestamp',
+      default: 'now()',
+      description: 'Última actualización.'
+    }
+  }}
+/>
+
+Índices: `empresa_id`, `(empresa_id, ordenes_trabajo_id)`, `(empresa_id, tecnico_id)`
+
+### repuestos_utilizados
+
+Vincula los repuestos consumidos con cada intervención técnica realizada, garantizando que el costo de los materiales se asocie directamente a la intervención.
+
+<TypeTable
+  type={{
+    id: {
+      type: 'integer (PK)',
+      required: true,
+      description: 'Identificador único.'
+    },
+    empresa_id: {
+      type: 'integer (FK)',
+      required: true,
+      description: 'Referencia a la empresa asociada.'
+    },
+    intervencion_id: {
+      type: 'integer (FK)',
+      required: true,
+      description: 'Referencia a la intervención técnica.'
+    },
+    repuesto_id: {
+      type: 'integer (FK)',
+      required: true,
+      description: 'Referencia al repuesto de inventario consumido.'
+    },
+    cantidad_usada: {
+      type: 'integer',
+      required: true,
+      description: 'Cantidad de repuesto consumida.'
+    },
+    precio_unitario: {
+      type: 'numeric(12,2)',
+      description: 'Precio unitario histórico de consumo.'
+    },
+    moneda: {
+      type: 'varchar(3)',
+      default: 'USD',
+      description: 'Divisa del precio unitario.'
+    },
+    created_at: {
+      type: 'timestamp',
+      default: 'now()',
+      description: 'Fecha de registro.'
+    },
+    updated_at: {
+      type: 'timestamp',
+      default: 'now()',
+      description: 'Última actualización.'
+    }
+  }}
+/>
+
+Índices: `empresa_id`, `(empresa_id, intervencion_id)`, `(empresa_id, repuesto_id)`
+
+---
+
+## Inventario
+
+### inventario_repuestos
+
+<TypeTable
+  type={{
+    id: {
+      type: 'integer (PK)',
+      required: true,
+      description: 'Identificador único autoincremental.'
+    },
+    empresa_id: {
+      type: 'integer (FK)',
+      required: true,
+      description: 'Referencia a la empresa asociada.'
+    },
+    articulo_id: {
+      type: 'integer (FK)',
+      required: true,
+      description: 'Referencia al artículo correspondiente del catálogo.'
+    },
+    proveedor_id: {
+      type: 'integer (FK)',
+      description: 'Referencia al proveedor principal.'
+    },
+    stock_actual: {
+      type: 'integer',
+      default: '0',
+      description: 'Cantidad actual en almacén.'
+    },
+    stock_minimo: {
+      type: 'integer',
+      default: '0',
+      description: 'Umbral para alertas de stock mínimo.'
+    },
+    ubicacion_almacen: {
+      type: 'varchar',
+      description: 'Ubicación física en el almacén (estante, pasillo).'
+    },
+    precio_unitario: {
+      type: 'numeric(12,2)',
+      description: 'Precio unitario de referencia.'
+    },
+    moneda: {
+      type: 'varchar(3)',
+      default: 'USD',
+      description: 'Divisa del precio unitario.'
+    },
+    created_at: {
+      type: 'timestamp',
+      default: 'now()',
+      description: 'Fecha de registro.'
+    },
+    updated_at: {
+      type: 'timestamp',
+      default: 'now()',
+      description: 'Última actualización del registro.'
+    }
+  }}
+/>
+
+### entradas_inventario
+
+Tabla de movimientos de inventario. Soporta tanto entradas como salidas mediante el campo `tipo_movimiento`.
+
+<TypeTable
+  type={{
+    id: {
+      type: 'integer (PK)',
+      required: true,
+      description: 'Identificador único.'
+    },
+    empresa_id: {
+      type: 'integer (FK)',
+      required: true,
+      description: 'Referencia a la empresa asociada.'
+    },
+    repuesto_id: {
+      type: 'integer (FK)',
+      required: true,
+      description: 'Referencia al repuesto de inventario.'
+    },
+    ordenes_trabajo_id: {
+      type: 'integer (FK)',
+      description: 'Referencia a la Orden de Trabajo que consumió el repuesto (si es salida).'
+    },
+    usuario_id: {
+      type: 'integer (FK)',
+      description: 'Usuario que registró el movimiento.'
+    },
+    cantidad: {
+      type: 'integer',
+      required: true,
+      description: 'Cantidad transaccionada.'
+    },
+    tipo_movimiento: {
+      type: 'varchar',
+      required: true,
+      description: 'Tipo de movimiento (entrada, salida).'
+    },
+    precio_unitario: {
+      type: 'numeric(12,2)',
+      description: 'Precio unitario al momento del movimiento.'
+    },
+    moneda: {
+      type: 'varchar(3)',
+      default: 'USD',
+      description: 'Divisa del precio unitario.'
+    },
+    fecha_movimiento: {
+      type: 'timestamp',
+      default: 'now()',
+      description: 'Fecha del movimiento.'
+    },
+    observaciones: {
+      type: 'text',
+      description: 'Observaciones o notas adicionales.'
+    },
+    created_at: {
+      type: 'timestamp',
+      default: 'now()',
+      description: 'Fecha de registro.'
+    },
+    updated_at: {
+      type: 'timestamp',
+      default: 'now()',
+      description: 'Última actualización.'
+    }
+  }}
+/>
+
+---
+
+## Auditoría y trazabilidad
+
+### auditorias_sistema
+
+Renombrada de `auditoria_sistema`. Registra acciones relevantes de los usuarios. El campo `timestamp` pasó a `ocurrido_en` para evitar conflicto con la palabra reservada.
+
+<TypeTable
+  type={{
+    id: {
+      type: 'integer (PK)',
+      required: true,
+      description: 'Identificador único.'
+    },
+    empresa_id: {
+      type: 'integer (FK)',
+      required: true,
+      description: 'Referencia a la empresa asociada.'
+    },
+    usuario_id: {
+      type: 'integer (FK)',
+      description: 'Usuario que realizó la acción.'
+    },
+    accion: {
+      type: 'varchar',
+      required: true,
+      description: 'Acción ejecutada (ej: login, create_ot).'
+    },
+    detalles: {
+      type: 'jsonb',
+      description: 'Detalles del cambio/evento en JSONB.'
+    },
+    ip_address: {
+      type: 'varchar',
+      description: 'Dirección IP del cliente.'
+    },
+    ocurrido_en: {
+      type: 'timestamp',
+      default: 'now()',
+      description: 'Fecha y hora del evento.'
+    }
+  }}
+/>
+
+### logs_estados_activos
+
+Rastrea los cambios de estado de los activos.
+
+<TypeTable
+  type={{
+    id: {
+      type: 'integer (PK)',
+      required: true,
+      description: 'Identificador único.'
+    },
+    empresa_id: {
+      type: 'integer (FK)',
+      required: true,
+      description: 'Referencia a la empresa asociada.'
+    },
+    activo_id: {
+      type: 'integer (FK)',
+      required: true,
+      description: 'Referencia al activo.'
+    },
+    usuario_id: {
+      type: 'integer (FK)',
+      description: 'Usuario que cambió el estado.'
+    },
+    estado_anterior: {
+      type: 'estado_activo',
+      description: 'Estado anterior del activo.'
+    },
+    estado_nuevo: {
+      type: 'estado_activo',
+      required: true,
+      description: 'Nuevo estado del activo.'
+    },
+    motivo: {
+      type: 'text',
+      description: 'Razón o motivo del cambio.'
+    },
+    fecha_cambio: {
+      type: 'timestamp',
+      default: 'now()',
+      description: 'Fecha del cambio.'
+    }
+  }}
+/>
+
+### logs_estados_ordenes_trabajo
+
+Rastrea cada transición de estado en las órdenes de trabajo.
+
+<TypeTable
+  type={{
+    id: {
+      type: 'integer (PK)',
+      required: true,
+      description: 'Identificador único.'
+    },
+    empresa_id: {
+      type: 'integer (FK)',
+      required: true,
+      description: 'Referencia a la empresa asociada.'
+    },
+    ordenes_trabajo_id: {
+      type: 'integer (FK)',
+      required: true,
+      description: 'Referencia a la orden de trabajo.'
+    },
+    usuario_id: {
+      type: 'integer (FK)',
+      description: 'Usuario que cambió el estado.'
+    },
+    estado_anterior: {
+      type: 'estado_orden_trabajo',
+      description: 'Estado anterior de la OT.'
+    },
+    estado_nuevo: {
+      type: 'estado_orden_trabajo',
+      required: true,
+      description: 'Nuevo estado de la OT.'
+    },
+    motivo: {
+      type: 'text',
+      description: 'Razón del cambio.'
+    },
+    fecha_cambio: {
+      type: 'timestamp',
+      default: 'now()',
+      description: 'Fecha del cambio.'
+    }
+  }}
+/>
+
+---
+
+## Resumen de relaciones
+
+```
+empresas ──< plan_id: planes_suscripcion (contrata un plan)
+
+usuarios ── preferencias_usuarios (relación 1:1)
+usuarios ──< roles_usuarios >── roles
+roles ──< permisos (CRUD por rol + módulo)
+
+ubicaciones ──< ubicaciones (self-ref, jerarquía)
+
+categorias_articulos ──< articulos_catalogo ──< activos
+proveedores ──< inventario_repuestos
+
+activos ──< planes_mantenimiento ──< planes_ejecuciones >── ordenes_trabajo
+activos ──< reportes_fallas ──< ordenes_trabajo
+activos ──< logs_estados_activos
+
+ordenes_trabajo ──< tecnicos_ordenes_trabajo >── usuarios
+ordenes_trabajo ──< intervenciones_tecnicas >── usuarios
+intervenciones_tecnicas ──< repuestos_utilizados >── inventario_repuestos
+ordenes_trabajo ──< logs_estados_ordenes_trabajo
+
+inventario_repuestos ──< entradas_inventario >── ordenes_trabajo (movimientos)
+
+auditorias_sistema (registro general de acciones)
+```
+
+Todas las tablas de inquilino (excepto las intermedias) heredan de `empresas` mediante `empresa_id`.
+
+---
+
+## Cambios respecto al MVP
+
+<TypeTable
+  type={{
+    'Capa multitenant': {
+      type: 'cambio',
+      description: 'Nuevas tablas empresas y planes_suscripcion; empresa_id en todas las tablas de inquilino.'
+    },
+    'Enums nuevos': {
+      type: 'cambio',
+      description: 'tipo_ubicacion, modulo_permiso, estado_empresa, prioridad_nivel, estado_reporte.'
+    },
+    'Enums nativos': {
+      type: 'cambio',
+      description: 'Todos los enums se definen como tipos nativos de PostgreSQL.'
+    },
+    'Tablas nuevas': {
+      type: 'cambio',
+      description: 'planes_suscripcion, empresas, preferencias_usuarios, planes_ejecuciones, tecnicos_ordenes_trabajo, intervenciones_tecnicas, repuestos_utilizados, logs_estados_ordenes_trabajo.'
+    },
+    'Tablas renombradas': {
+      type: 'cambio',
+      description: 'auditoria_sistema → auditorias_sistema, reportes_falla → reportes_fallas.'
+    },
+    'Firma digital': {
+      type: 'cambio',
+      description: 'validado_gerencia (boolean) → validado_por_id + fecha_validacion.'
+    },
+    'Frecuencia eliminada': {
+      type: 'cambio',
+      description: 'frecuencia (enum redundante) eliminado; intervalo_dias es not null como única fuente de verdad.'
+    },
+    'Integridad': {
+      type: 'cambio',
+      description: 'Campos text → varchar en campos cortos; enums nativos en todas las tablas.'
+    },
+    'Timestamps': {
+      type: 'cambio',
+      description: 'Todas las tablas ganan created_at y updated_at con default: now().'
+    },
+    'Intervenciones y Repuestos': {
+      type: 'cambio',
+      description: 'Incorporación de intervenciones_tecnicas y repuestos_utilizados para registrar horas hombre, tareas y consumos de materiales.'
+    },
+    'Preferencias de usuario': {
+      type: 'cambio',
+      description: 'Incorporación de la tabla preferencias_usuarios con relación 1:1 para almacenar preferencias visuales (tema).'
+    }
+  }}
+/>
+
+### Funcionalidades diferidas
+
+Las siguientes mejoras identificadas durante el diseño no se incluyen y quedan para versiones posteriores:
+
+<TypeTable
+  type={{
+    Multimoneda: {
+      type: 'diferido',
+      description: 'Tabla tasas_cambio con histórico de tasas y campos multimoneda en activos, ordenes_trabajo, inventario_repuestos y entradas_inventario.'
+    },
+    'KPIs precalculados': {
+      type: 'diferido',
+      description: 'Tablas kpis_activos_mensuales y kpis_tecnicos_mensuales con métricas de disponibilidad, MTBF, MTTR y rendimiento.'
+    },
+    Alertas: {
+      type: 'diferido',
+      description: 'Tabla alertas con soporte polimórfico para stock bajo, vencimiento de planes y otras notificaciones.'
+    },
+    'Auditoría granular': {
+      type: 'diferido',
+      description: 'Tabla auditorias_cambios con registro campo por campo.'
+    },
+    'Configuración dinámica': {
+      type: 'diferido',
+      description: 'Tabla configuraciones_sistema para parámetros clave-valor sin tocar código.'
+    }
+  }}
+/>

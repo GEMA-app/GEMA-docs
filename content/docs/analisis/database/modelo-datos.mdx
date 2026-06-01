@@ -1,355 +1,522 @@
 ---
 title: Modelo de datos
-description: Esquema de base de datos de GEMA — tablas, campos, enums y relaciones.
+description: Esquema de base de datos de GEMA. SaaS multitenant con PostgreSQL, enums nativos, timestamps automáticos y firmas digitales en órdenes de trabajo.
 ---
 
 # Modelo de datos GEMA
 
-Este documento describe el esquema de base de datos de GEMA (Gestión Estratégica de Mantenimiento de Activos) en su versión 0. Sirve como referencia para entender qué tablas existen, qué guarda cada una y cómo se relacionan entre sí.
-
-> [!NOTE]
-> Existe una propuesta de evolución de este esquema (v0.1) con multimoneda, auditoría granular, KPIs y alertas. Consulta la [propuesta v0.1](/docs/analisis/database/propuesta-v0.1) para ver el esquema completo en revisión.
+Este documento describe el esquema de base de datos de GEMA. Sigue un patrón multitenant con esquema compartido: todas las tablas de inquilino llevan `empresa_id` para aislar los datos de cada cliente, con políticas RLS a nivel de base de datos.
 
 ---
 
 ## Enums del sistema
 
-Los enums definen los valores permitidos para ciertos campos. El motor de base de datos rechaza cualquier valor que no esté en esta lista.
+GEMA define seis enums nativos de PostgreSQL para garantizar integridad referencial a nivel de base de datos.
 
-| Enum | Valores |
-|---|---|
-| `estado_activo` | `operativo`, `mantenimiento`, `fuera_servicio`, `baja` |
-| `estado_ot` | `abierta`, `en_progreso`, `en_espera_repuesto`, `completada`, `cancelada` |
-| `tipo_mantenimiento` | `preventivo`, `correctivo`, `predictivo` |
-| `prioridad_nivel` | `critica`, `alta`, `media`, `baja` |
-| `frecuencia_tipo` | `diaria`, `semanal`, `quincenal`, `mensual`, `trimestral`, `semestral`, `anual` |
+| Enum | Valores | Descripción |
+|---|---|---|
+| `estado_activo` | `operativo`, `en_mantenimiento`, `fuera_de_servicio`, `dado_de_baja` | Estados del ciclo de vida de un activo |
+| `tipo_mantenimiento` | `preventivo`, `correctivo`, `predictivo` | Clasificación del mantenimiento |
+| `estado_orden_trabajo` | `abierta`, `en_proceso`, `pausada`, `cerrada`, `cancelada` | Estados del ciclo de una orden de trabajo |
+| `tipo_ubicacion` | `sede`, `planta`, `area`, `seccion` | Niveles jerárquicos de ubicación |
+| `modulo_permiso` | `activos`, `mantenimiento`, `inventario`, `reportes`, `administracion` | Módulos del sistema para el RBAC |
+| `estado_empresa` | `activa`, `suspendida`, `cancelada` | Estados de la cuenta de un cliente |
+| `prioridad_nivel` | `critica`, `alta`, `media`, `baja` | Nivel de urgencia de reportes de fallas |
+| `estado_reporte` | `pendiente`, `en_proceso`, `atendido`, `descartado` | Estados de procesamiento de un reporte de falla |
+
+---
+
+## Capa de plataforma
+
+Estas tablas pertenecen al SaaS y no llevan `empresa_id`. Almacenan datos globales de la plataforma.
+
+### planes_suscripcion
+
+Planes comerciales que determinan los límites de cada cliente.
+
+| Campo | Tipo | Restricciones | Descripción |
+|---|---|---|---|
+| `id` | integer | pk, autoincremental | Identificador único |
+| `nombre` | varchar | unique, not null | `starter`, `profesional`, `enterprise` |
+| `descripcion` | text | | Descripción del plan |
+| `max_activos` | integer | null | Máximo de activos (null = ilimitado) |
+| `max_usuarios` | integer | null | Máximo de usuarios (null = ilimitado) |
+| `precio_mensual_usd` | numeric(10,2) | | Precio mensual del plan |
+| `created_at` | timestamp | default: now() | Fecha de creación |
+| `updated_at` | timestamp | default: now() | Última actualización |
+
+### empresas
+
+Cada fila representa un cliente (inquilino) del sistema.
+
+| Campo | Tipo | Restricciones | Descripción |
+|---|---|---|---|
+| `id` | integer | pk, autoincremental | Identificador único |
+| `plan_id` | integer | ref: planes_suscripcion.id | Plan contratado |
+| `nombre` | varchar | not null | Nombre de la empresa |
+| `slug` | varchar | unique, not null | Identificador URL-safe (ej: `pdvsa-occidente`) |
+| `rif` | varchar | | RIF, NIT o equivalente fiscal |
+| `email_contacto` | varchar | | Correo de contacto |
+| `estado` | estado_empresa | default: activa | Estado de la cuenta |
+| `trial_hasta` | date | null | Fecha de fin del periodo de prueba |
+| `created_at` | timestamp | default: now() | Fecha de creación |
+| `updated_at` | timestamp | default: now() | Última actualización |
+
+---
+
+## Capa de inquilino
+
+Todas las tablas siguientes incluyen `empresa_id` como clave foránea a `empresas.id`. Las restricciones `unique` son compuestas con `empresa_id` para permitir que valores idénticos existan en distintos clientes. Cada tabla tiene un índice explícito sobre `empresa_id` para garantizar el rendimiento de las consultas.
 
 ---
 
 ## Seguridad y accesos (RBAC)
 
-El sistema usa control de acceso basado en roles. Un usuario tiene uno o más roles, y cada rol agrupa permisos sobre módulos específicos.
+El control de acceso se basa en roles. Los permisos se definen por combinación de rol y módulo, con banderas CRUD independientes.
 
 ### usuarios
 
-Guarda la información de cada persona que accede al sistema.
-
 | Campo | Tipo | Restricciones | Descripción |
 |---|---|---|---|
 | `id` | integer | pk, autoincremental | Identificador único |
-| `nombre` | text | not null | Nombre completo |
-| `email` | text | unique, not null | Correo electrónico, usado para login |
-| `password_hash` | text | not null | Contraseña cifrada |
-| `telefono` | text | | Teléfono de contacto |
+| `empresa_id` | integer | ref: empresas.id, not null | Empresa a la que pertenece |
+| `nombre` | varchar | not null | Nombre completo |
+| `email` | varchar | not null | Correo electrónico |
+| `password_hash` | varchar | not null | Contraseña cifrada |
+| `telefono` | varchar | | Teléfono de contacto |
 | `activo` | boolean | default: true | Indica si la cuenta está habilitada |
-| `created_at` | timestamp | | Fecha de creación |
-| `updated_at` | timestamp | | Última actualización |
+| `created_at` | timestamp | default: now() | Fecha de creación |
+| `updated_at` | timestamp | default: now() | Última actualización |
+
+Índice único: `(empresa_id, email)`
 
 ### roles
 
-Define los perfiles de acceso disponibles en el sistema.
-
 | Campo | Tipo | Restricciones | Descripción |
 |---|---|---|---|
 | `id` | integer | pk, autoincremental | Identificador único |
-| `nombre` | varchar | unique, not null | Nombre del rol (ej: `admin`, `tecnico`) |
+| `empresa_id` | integer | ref: empresas.id, not null | Empresa a la que pertenece |
+| `nombre` | varchar | not null | Nombre del rol |
 | `descripcion` | text | | Descripción del rol |
+| `created_at` | timestamp | default: now() | Fecha de creación |
+| `updated_at` | timestamp | default: now() | Última actualización |
 
-### permisos
+Índice único: `(empresa_id, nombre)`
 
-Cada permiso autoriza una acción sobre un módulo del sistema.
-
-| Campo | Tipo | Restricciones | Descripción |
-|---|---|---|---|
-| `id` | integer | pk, autoincremental | Identificador único |
-| `nombre` | varchar | unique, not null | Nombre del permiso (ej: `crear_ot`) |
-| `modulo` | varchar | not null | Módulo al que pertenece: `activos`, `ot`, `inventario`, `reportes`, `admin` |
-
-### usuario_roles
+### roles_usuarios
 
 Tabla intermedia que asigna roles a usuarios.
 
 | Campo | Tipo | Restricciones | Descripción |
 |---|---|---|---|
 | `usuario_id` | integer | pk, ref: usuarios.id | Usuario |
-| `role_id` | integer | pk, ref: roles.id | Rol asignado |
+| `rol_id` | integer | pk, ref: roles.id | Rol asignado |
+| `created_at` | timestamp | default: now() | Fecha de asignación |
 
-### role_permisos
+### permisos
 
-Tabla intermedia que asigna permisos a roles.
+Los permisos se definen por combinación de rol y módulo. Cada fila representa los privilegios CRUD de un rol sobre un módulo específico.
 
 | Campo | Tipo | Restricciones | Descripción |
 |---|---|---|---|
-| `role_id` | integer | pk, ref: roles.id | Rol |
-| `permiso_id` | integer | pk, ref: permisos.id | Permiso asignado |
+| `id` | integer | pk, autoincremental | Identificador único |
+| `empresa_id` | integer | ref: empresas.id, not null | Empresa a la que pertenece |
+| `rol_id` | integer | ref: roles.id, not null | Rol asociado |
+| `modulo` | modulo_permiso | not null | Módulo del sistema |
+| `puede_ver` | boolean | default: false | Permiso de lectura |
+| `puede_crear` | boolean | default: false | Permiso de creación |
+| `puede_editar` | boolean | default: false | Permiso de edición |
+| `puede_eliminar` | boolean | default: false | Permiso de eliminación |
+| `created_at` | timestamp | default: now() | Fecha de creación |
+| `updated_at` | timestamp | default: now() | Última actualización |
+
+Índice único: `(empresa_id, rol_id, modulo)`
+
+### preferencias_usuarios
+
+Guarda las preferencias visuales y de configuración de cada usuario (relación 1:1).
+
+| Campo | Tipo | Restricciones | Descripción |
+|---|---|---|---|
+| `usuario_id` | integer | pk, ref: usuarios.id | Usuario al que pertenecen las preferencias |
+| `empresa_id` | integer | ref: empresas.id, not null | Empresa a la que pertenece |
+| `tema` | varchar | default: oscuro, not null | Tema visual del sistema (`oscuro`, `claro`, etc.) |
+| `created_at` | timestamp | default: now() | Fecha de creación |
+| `updated_at` | timestamp | default: now() | Última actualización |
+
+Índices: `empresa_id`
 
 ---
 
 ## Ubicaciones técnicas
 
-Las ubicaciones forman una jerarquía: sede → planta → área → sección. El campo `parent_id` apunta a la ubicación padre; si es `null`, la ubicación es un nodo raíz (una sede).
+Las ubicaciones siguen una jerarquía padre-hijo. El campo `tipo` usa el enum `tipo_ubicacion` para restringir los valores posibles.
 
 ### ubicaciones
 
 | Campo | Tipo | Restricciones | Descripción |
 |---|---|---|---|
 | `id` | integer | pk, autoincremental | Identificador único |
-| `parent_id` | integer | ref: ubicaciones.id, null | Ubicación padre (jerarquía) |
+| `empresa_id` | integer | ref: empresas.id, not null | Empresa a la que pertenece |
+| `parent_id` | integer | ref: ubicaciones.id, null | Ubicación padre (null = raíz de la jerarquía) |
 | `nombre` | varchar | not null | Nombre de la ubicación |
-| `tipo` | varchar | not null | Tipo: `sede`, `planta`, `area`, `seccion` |
+| `tipo` | tipo_ubicacion | not null | `sede`, `planta`, `area`, `seccion` |
 | `descripcion` | text | | Descripción adicional |
+| `created_at` | timestamp | default: now() | Fecha de creación |
+| `updated_at` | timestamp | default: now() | Última actualización |
 
 ---
 
 ## Catálogo de activos
 
-Antes de registrar un activo físico, el sistema necesita saber qué tipo de equipo es. El catálogo organiza los artículos por categoría y guarda sus especificaciones técnicas.
-
 ### categorias_articulos
-
-Categorías jerárquicas para clasificar artículos (ej: Eléctricos → Motores → Trifásicos).
 
 | Campo | Tipo | Restricciones | Descripción |
 |---|---|---|---|
 | `id` | integer | pk, autoincremental | Identificador único |
-| `parent_id` | integer | ref: categorias_articulos.id, null | Categoría padre |
-| `nombre` | text | not null | Nombre de la categoría |
+| `empresa_id` | integer | ref: empresas.id, not null | Empresa a la que pertenece |
+| `nombre` | varchar | not null | Nombre de la categoría |
 | `descripcion` | text | | Descripción |
+| `created_at` | timestamp | default: now() | Fecha de creación |
+| `updated_at` | timestamp | default: now() | Última actualización |
+
+Índice único: `(empresa_id, nombre)`
 
 ### articulos_catalogo
 
-Define los modelos y marcas disponibles en el catálogo.
-
 | Campo | Tipo | Restricciones | Descripción |
 |---|---|---|---|
 | `id` | integer | pk, autoincremental | Identificador único |
+| `empresa_id` | integer | ref: empresas.id, not null | Empresa a la que pertenece |
 | `categoria_id` | integer | ref: categorias_articulos.id | Categoría del artículo |
-| `marca` | text | | Marca del fabricante |
-| `modelo` | text | | Modelo del equipo |
-| `especificaciones` | jsonb | | Datasheet flexible con especificaciones técnicas |
-
----
-
-## Gestión de activos
-
-Aquí se registran los equipos físicos instalados en campo. Cada activo tiene un artículo de catálogo, una ubicación y un estado operativo.
-
-### activos
-
-| Campo | Tipo | Restricciones | Descripción |
-|---|---|---|---|
-| `id` | integer | pk, autoincremental | Identificador único |
-| `articulo_id` | integer | ref: articulos_catalogo.id | Tipo de artículo |
-| `ubicacion_id` | integer | ref: ubicaciones.id | Dónde está instalado |
-| `serial_interno` | varchar | unique, not null | Serial del fabricante o tag de campo |
-| `codigo_activo` | varchar | unique, not null | Código interno asignado por la empresa |
-| `estado` | estado_activo | default: operativo | Estado actual del activo |
-| `fecha_adquisicion` | date | | Fecha de compra |
-| `valor_monetario` | numeric(12,2) | | Valor de adquisición |
-| `moneda` | varchar(3) | default: USD | Divisa: `USD`, `VES`, `EUR` |
-| `created_at` | timestamp | | Fecha de registro |
-
----
-
-## Planificación de mantenimiento preventivo
-
-Los planes definen qué mantenimiento necesita cada activo, con qué frecuencia y quién es el responsable.
-
-### planes_mantenimiento
-
-| Campo | Tipo | Restricciones | Descripción |
-|---|---|---|---|
-| `id` | integer | pk, autoincremental | Identificador único |
-| `activo_id` | integer | ref: activos.id | Activo al que aplica |
-| `tecnico_responsable_id` | integer | ref: usuarios.id | Técnico asignado |
-| `nombre` | varchar | not null | Nombre del plan |
-| `tipo` | tipo_mantenimiento | not null | Tipo: `preventivo`, `correctivo`, `predictivo` |
-| `frecuencia` | frecuencia_tipo | not null | Frecuencia programada |
-| `intervalo_dias` | integer | | Días entre ejecuciones |
-| `proxima_ejecucion` | date | not null | Fecha de la próxima revisión |
-| `descripcion_tareas` | text | | Detalle de las tareas a realizar |
-| `activo` | boolean | default: true | Si el plan está vigente |
-| `created_at` | timestamp | | Fecha de creación |
-
----
-
-## Reportes y órdenes de trabajo
-
-El ciclo de trabajo arranca cuando alguien reporta una falla o cuando el sistema genera una orden desde un plan preventivo.
-
-### reportes_falla
-
-| Campo | Tipo | Restricciones | Descripción |
-|---|---|---|---|
-| `id` | integer | pk, autoincremental | Identificador único |
-| `usuario_reporta_id` | integer | ref: usuarios.id | Quién reporta la falla |
-| `activo_id` | integer | ref: activos.id | Activo afectado |
-| `descripcion_falla` | text | not null | Descripción del problema |
-| `prioridad` | prioridad_nivel | default: media | Nivel de urgencia |
-| `fecha_reporte` | timestamp | default: now() | Cuándo se reportó |
-| `atendido` | boolean | default: false | Si ya fue atendido |
-
-### ordenes_trabajo
-
-La orden de trabajo es el registro central del mantenimiento. Cada OT tiene un código único, un activo asociado, un tipo de mantenimiento y un ciclo de vida con timestamps para calcular MTTR.
-
-| Campo | Tipo | Restricciones | Descripción |
-|---|---|---|---|
-| `id` | integer | pk, autoincremental | Identificador único |
-| `codigo_ot` | varchar | unique, not null | Código legible (ej: `OT-2026-0001`) |
-| `activo_id` | integer | ref: activos.id | Activo intervenido |
-| `reporte_id` | integer | ref: reportes_falla.id, null | Origen si es correctivo |
-| `plan_id` | integer | ref: planes_mantenimiento.id, null | Origen si es preventivo |
-| `supervisor_id` | integer | ref: usuarios.id | Supervisor a cargo |
-| `tipo` | tipo_mantenimiento | not null | Tipo de mantenimiento |
-| `estado` | estado_ot | default: abierta | Estado actual de la orden |
-| `fecha_apertura` | timestamp | | Cuándo se abrió la OT |
-| `fecha_inicio_trabajo` | timestamp | | Cuándo arrancó el trabajo |
-| `fecha_cierre` | timestamp | | Cuándo se cerró la OT |
-| `descripcion_trabajo` | text | | Detalle del trabajo realizado |
-| `costo_estimado` | numeric(12,2) | | Costo presupuestado |
-| `costo_real` | numeric(12,2) | | Costo final ejecutado |
-| `moneda` | varchar(3) | default: USD | Divisa |
-| `validado_gerencia` | boolean | default: false | Si gerencia aprobó la OT |
-| `created_at` | timestamp | | Fecha de creación |
-
-### ot_tecnicos_asignados
-
-Asigna técnicos a una orden antes de iniciar el trabajo. Cada técnico debe confirmar su asignación.
-
-| Campo | Tipo | Restricciones | Descripción |
-|---|---|---|---|
-| `ot_id` | integer | pk, ref: ordenes_trabajo.id | Orden de trabajo |
-| `tecnico_id` | integer | pk, ref: usuarios.id | Técnico asignado |
-| `fecha_asignacion` | timestamp | default: now() | Cuándo se asignó |
-| `confirmado` | boolean | default: false | Si el técnico confirmó |
-
-### intervenciones_tecnicas
-
-Registra cada sesión de trabajo dentro de una orden. Una OT puede tener múltiples intervenciones.
-
-| Campo | Tipo | Restricciones | Descripción |
-|---|---|---|---|
-| `id` | integer | pk, autoincremental | Identificador único |
-| `ot_id` | integer | ref: ordenes_trabajo.id | Orden de trabajo |
-| `tecnico_id` | integer | ref: usuarios.id | Técnico que ejecutó |
-| `fecha_inicio` | timestamp | | Inicio de la intervención |
-| `fecha_fin` | timestamp | | Fin de la intervención |
-| `horas_hombre` | numeric(6,2) | | Tiempo dedicado (base para KPIs) |
-| `tareas_realizadas` | text | | Descripción del trabajo |
-
----
-
-## Inventario y proveedores
-
-Control de repuestos, stock, proveedores y trazabilidad de cada entrada de almacén.
+| `nombre` | varchar | not null | Nombre del artículo |
+| `descripcion` | text | | Descripción |
+| `fabricante` | varchar | | Fabricante del equipo |
+| `modelo` | varchar | | Modelo del equipo |
+| `unidad_medida` | varchar | | Unidad de medida del artículo |
+| `created_at` | timestamp | default: now() | Fecha de creación |
+| `updated_at` | timestamp | default: now() | Última actualización |
 
 ### proveedores
 
 | Campo | Tipo | Restricciones | Descripción |
 |---|---|---|---|
 | `id` | integer | pk, autoincremental | Identificador único |
-| `nombre` | text | not null | Nombre del proveedor |
-| `rif` | varchar | unique | Registro de información fiscal |
-| `contacto` | text | | Persona de contacto |
-| `email` | text | | Correo electrónico |
-| `telefono` | text | | Teléfono |
-| `activo` | boolean | default: true | Si el proveedor está habilitado |
+| `empresa_id` | integer | ref: empresas.id, not null | Empresa a la que pertenece |
+| `nombre` | varchar | not null | Nombre del proveedor |
+| `rif` | varchar | | Registro de información fiscal |
+| `telefono` | varchar | | Teléfono |
+| `email` | varchar | | Correo electrónico |
+| `contacto` | varchar | | Persona de contacto |
+| `created_at` | timestamp | default: now() | Fecha de registro |
+| `updated_at` | timestamp | default: now() | Última actualización |
+
+Índice único: `(empresa_id, rif)`
+
+---
+
+## Activos
+
+### activos
+
+| Campo | Tipo | Restricciones | Descripción |
+|---|---|---|---|
+| `id` | integer | pk, autoincremental | Identificador único |
+| `empresa_id` | integer | ref: empresas.id, not null | Empresa a la que pertenece |
+| `articulo_id` | integer | ref: articulos_catalogo.id, not null | Tipo de artículo del catálogo |
+| `ubicacion_id` | integer | ref: ubicaciones.id | Dónde está instalado |
+| `serial_interno` | varchar | not null | Serial del fabricante o tag de campo |
+| `codigo_activo` | varchar | not null | Código interno asignado por la empresa |
+| `estado` | estado_activo | default: operativo | Estado actual del activo |
+| `fecha_adquisicion` | date | | Fecha de compra |
+| `valor_monetario` | numeric(12,2) | | Valor monetario del activo |
+| `moneda` | varchar(3) | default: USD | Divisa del valor |
+| `created_at` | timestamp | default: now() | Fecha de registro |
+| `updated_at` | timestamp | default: now() | Última actualización |
+
+Índices únicos: `(empresa_id, serial_interno)`, `(empresa_id, codigo_activo)`
+
+---
+
+## Planificación de mantenimiento preventivo
+
+Se eliminó el campo `frecuencia` (enum redundante). `intervalo_dias` es la única fuente de verdad para calcular la cadencia.
+
+### planes_mantenimiento
+
+| Campo | Tipo | Restricciones | Descripción |
+|---|---|---|---|
+| `id` | integer | pk, autoincremental | Identificador único |
+| `empresa_id` | integer | ref: empresas.id, not null | Empresa a la que pertenece |
+| `activo_id` | integer | ref: activos.id, not null | Activo al que aplica |
+| `tecnico_responsable_id` | integer | ref: usuarios.id | Técnico asignado |
+| `nombre` | varchar | not null | Nombre del plan |
+| `tipo` | tipo_mantenimiento | not null | Tipo de mantenimiento |
+| `intervalo_dias` | integer | not null | Días entre ejecuciones (fuente única de verdad) |
+| `proxima_ejecucion` | date | not null | Fecha de la próxima revisión |
+| `descripcion_tareas` | text | | Detalle de las tareas a realizar |
+| `activo` | boolean | default: true | Si el plan está vigente |
+| `created_at` | timestamp | default: now() | Fecha de creación |
+| `updated_at` | timestamp | default: now() | Última actualización |
+
+### planes_ejecuciones
+
+Tabla que vincula cada plan con las órdenes de trabajo que generó.
+
+| Campo | Tipo | Restricciones | Descripción |
+|---|---|---|---|
+| `id` | integer | pk, autoincremental | Identificador único |
+| `empresa_id` | integer | ref: empresas.id, not null | Empresa a la que pertenece |
+| `plan_id` | integer | ref: planes_mantenimiento.id, not null | Plan que originó la OT |
+| `ordenes_trabajo_id` | integer | ref: ordenes_trabajo.id, not null | Orden de trabajo generada |
+| `fecha_ejecucion` | timestamp | default: now() | Cuándo se ejecutó |
+| `observaciones` | text | | Notas sobre la ejecución |
+| `created_at` | timestamp | default: now() | Fecha de registro |
+| `updated_at` | timestamp | default: now() | Última actualización |
+
+---
+
+## Reportes y órdenes de trabajo
+
+La tabla `reportes_falla` se renombró a `reportes_fallas` (plural consistente).
+
+### reportes_fallas
+
+| Campo | Tipo | Restricciones | Descripción |
+|---|---|---|---|
+| `id` | integer | pk, autoincremental | Identificador único |
+| `empresa_id` | integer | ref: empresas.id, not null | Empresa a la que pertenece |
+| `activo_id` | integer | ref: activos.id, not null | Activo afectado |
+| `reportado_por_id` | integer | ref: usuarios.id | Quién reporta la falla |
+| `descripcion` | text | not null | Descripción del problema |
+| `prioridad` | prioridad_nivel | default: media, not null | Nivel de urgencia (crítica, alta, media, baja) |
+| `estado` | estado_reporte | default: pendiente, not null | Estado de procesamiento del reporte |
+| `fecha_reporte` | timestamp | default: now() | Cuándo se reportó |
+| `created_at` | timestamp | default: now() | Fecha de registro |
+| `updated_at` | timestamp | default: now() | Última actualización |
+
+### ordenes_trabajo
+
+`validado_gerencia` (boolean) se reemplazó por `validado_por_id` + `fecha_validacion` para trazabilidad de aprobaciones. `codigo_ot` es único dentro de cada empresa.
+
+| Campo | Tipo | Restricciones | Descripción |
+|---|---|---|---|
+| `id` | integer | pk, autoincremental | Identificador único |
+| `empresa_id` | integer | ref: empresas.id, not null | Empresa a la que pertenece |
+| `codigo_ot` | varchar | not null | Código legible (ej: `OT-2026-0001`, único por empresa) |
+| `activo_id` | integer | ref: activos.id, not null | Activo intervenido |
+| `reporte_id` | integer | ref: reportes_fallas.id, null | Origen si es correctivo |
+| `plan_id` | integer | ref: planes_mantenimiento.id, null | Origen si es preventivo |
+| `supervisor_id` | integer | ref: usuarios.id | Supervisor a cargo |
+| `tipo` | tipo_mantenimiento | not null | Tipo de mantenimiento |
+| `estado` | estado_orden_trabajo | default: abierta | Estado actual de la orden |
+| `fecha_apertura` | timestamp | | Cuándo se abrió la OT |
+| `fecha_inicio_trabajo` | timestamp | | Cuándo arrancó el trabajo |
+| `fecha_cierre` | timestamp | | Cuándo se cerró la OT |
+| `descripcion_trabajo` | text | | Detalle del trabajo realizado |
+| `costo_estimado` | numeric(12,2) | | Costo presupuestado |
+| `costo_real` | numeric(12,2) | | Costo final |
+| `moneda` | varchar(3) | default: USD | Divisa de los costos |
+| `validado_por_id` | integer | ref: usuarios.id, null | Usuario que aprobó la OT |
+| `fecha_validacion` | timestamp | | Cuándo se aprobó |
+| `created_at` | timestamp | default: now() | Fecha de creación |
+| `updated_at` | timestamp | default: now() | Última actualización |
+
+Índice único: `(empresa_id, codigo_ot)`
+
+### tecnicos_ordenes_trabajo
+
+Tabla intermedia que asigna técnicos a una orden de trabajo.
+
+| Campo | Tipo | Restricciones | Descripción |
+|---|---|---|---|
+| `ordenes_trabajo_id` | integer | pk, ref: ordenes_trabajo.id | Orden de trabajo |
+| `tecnico_id` | integer | pk, ref: usuarios.id | Técnico asignado |
+| `created_at` | timestamp | default: now() | Fecha de registro |
+
+### intervenciones_tecnicas
+
+Registra cada sesión de trabajo realizada por un técnico en el contexto de una orden de trabajo. Permite registrar las horas hombre y las tareas detalladas para el cálculo de KPIs de eficiencia.
+
+| Campo | Tipo | Restricciones | Descripción |
+|---|---|---|---|
+| `id` | integer | pk, autoincremental | Identificador único |
+| `empresa_id` | integer | ref: empresas.id, not null | Empresa a la que pertenece |
+| `ordenes_trabajo_id` | integer | ref: ordenes_trabajo.id, not null | Orden de trabajo asociada |
+| `tecnico_id` | integer | ref: usuarios.id, not null | Técnico que ejecutó el trabajo |
+| `fecha_inicio` | timestamp | not null | Cuándo inició el trabajo |
+| `fecha_fin` | timestamp | | Cuándo finalizó el trabajo |
+| `horas_hombre` | numeric(5,2) | not null | Horas trabajadas (base para KPIs de eficiencia) |
+| `tareas_realizadas` | text | not null | Detalle de las tareas realizadas |
+| `created_at` | timestamp | default: now() | Fecha de creación |
+| `updated_at` | timestamp | default: now() | Última actualización |
+
+Índices: `empresa_id`, `(empresa_id, ordenes_trabajo_id)`, `(empresa_id, tecnico_id)`
+
+### repuestos_utilizados
+
+Vincula los repuestos consumidos con cada intervención técnica realizada, garantizando que el costo de los materiales se asocie directamente a la intervención.
+
+| Campo | Tipo | Restricciones | Descripción |
+|---|---|---|---|
+| `id` | integer | pk, autoincremental | Identificador único |
+| `empresa_id` | integer | ref: empresas.id, not null | Empresa a la que pertenece |
+| `intervencion_id` | integer | ref: intervenciones_tecnicas.id, not null | Intervención en la que se utilizó |
+| `repuesto_id` | integer | ref: inventario_repuestos.id, not null | Repuesto consumido |
+| `cantidad_usada` | integer | not null | Cantidad consumida |
+| `precio_unitario` | numeric(12,2) | | Precio unitario al momento de consumo |
+| `moneda` | varchar(3) | default: USD | Divisa utilizada |
+| `created_at` | timestamp | default: now() | Fecha de registro |
+| `updated_at` | timestamp | default: now() | Última actualización |
+
+Índices: `empresa_id`, `(empresa_id, intervencion_id)`, `(empresa_id, repuesto_id)`
+
+---
+
+## Inventario
 
 ### inventario_repuestos
 
 | Campo | Tipo | Restricciones | Descripción |
 |---|---|---|---|
 | `id` | integer | pk, autoincremental | Identificador único |
-| `proveedor_id` | integer | ref: proveedores.id, null | Proveedor principal |
-| `nombre` | text | not null | Nombre del repuesto |
-| `codigo_parte` | varchar | unique | Código del fabricante |
-| `stock_actual` | numeric(10,2) | default: 0 | Cantidad en almacén |
-| `stock_critico` | numeric(10,2) | not null | Umbral que dispara alerta de reposición |
-| `precio_unitario` | numeric(12,2) | | Precio de referencia |
-| `moneda` | varchar(3) | default: USD | Divisa |
+| `empresa_id` | integer | ref: empresas.id, not null | Empresa a la que pertenece |
+| `articulo_id` | integer | ref: articulos_catalogo.id, not null | Artículo del catálogo |
+| `proveedor_id` | integer | ref: proveedores.id | Proveedor principal |
+| `stock_actual` | integer | default: 0 | Cantidad en almacén |
+| `stock_minimo` | integer | default: 0 | Umbral para alertas de stock bajo |
+| `ubicacion_almacen` | varchar | | Ubicación física dentro del almacén |
+| `precio_unitario` | numeric(12,2) | | Precio unitario |
+| `moneda` | varchar(3) | default: USD | Divisa del precio |
+| `created_at` | timestamp | default: now() | Fecha de registro |
+| `updated_at` | timestamp | default: now() | Última actualización |
 
 ### entradas_inventario
 
-Cada entrada de stock queda registrada para trazabilidad completa. Esta tabla es inmutable en el sentido de que no se edita: cada nueva compra genera un nuevo registro.
+Tabla de movimientos de inventario. Soporta tanto entradas como salidas mediante el campo `tipo_movimiento`.
 
 | Campo | Tipo | Restricciones | Descripción |
 |---|---|---|---|
 | `id` | integer | pk, autoincremental | Identificador único |
-| `repuesto_id` | integer | ref: inventario_repuestos.id | Repuesto que ingresa |
-| `proveedor_id` | integer | ref: proveedores.id | Proveedor de la compra |
-| `usuario_registra_id` | integer | ref: usuarios.id | Quién registró la entrada |
-| `cantidad` | numeric(10,2) | not null | Cantidad ingresada |
-| `precio_unitario` | numeric(12,2) | | Precio pagado por unidad |
-| `moneda` | varchar(3) | default: USD | Divisa |
-| `fecha_entrada` | timestamp | default: now() | Cuándo ingresó al almacén |
-| `nro_factura` | varchar | | Número de factura asociado |
-
-### repuestos_utilizados
-
-Vincula los repuestos consumidos con cada intervención técnica.
-
-| Campo | Tipo | Restricciones | Descripción |
-|---|---|---|---|
-| `id` | integer | pk, autoincremental | Identificador único |
-| `intervencion_id` | integer | ref: intervenciones_tecnicas.id | Intervención donde se usó |
-| `repuesto_id` | integer | ref: inventario_repuestos.id | Repuesto consumido |
-| `cantidad_usada` | numeric(10,2) | not null | Cantidad utilizada |
+| `empresa_id` | integer | ref: empresas.id, not null | Empresa a la que pertenece |
+| `repuesto_id` | integer | ref: inventario_repuestos.id, not null | Repuesto asociado |
+| `ordenes_trabajo_id` | integer | ref: ordenes_trabajo.id, null | OT que consumió el repuesto (si es salida) |
+| `usuario_id` | integer | ref: usuarios.id | Usuario que registró el movimiento |
+| `cantidad` | integer | not null | Cantidad del movimiento |
+| `tipo_movimiento` | varchar | not null | `entrada` o `salida` |
+| `precio_unitario` | numeric(12,2) | | Precio unitario en el momento del movimiento |
+| `moneda` | varchar(3) | default: USD | Divisa del precio |
+| `fecha_movimiento` | timestamp | default: now() | Cuándo ocurrió el movimiento |
+| `observaciones` | text | | Notas adicionales |
+| `created_at` | timestamp | default: now() | Fecha de registro |
+| `updated_at` | timestamp | default: now() | Última actualización |
 
 ---
 
-## BI y auditoría
+## Auditoría y trazabilidad
 
-Tablas para rastrear cambios de estado y registrar acciones del sistema. La tabla `logs_estados_activos` es clave para calcular MTBF (tiempo medio entre fallos).
+### auditorias_sistema
 
-### logs_estados_activos
-
-| Campo | Tipo | Restricciones | Descripción |
-|---|---|---|---|
-| `id` | integer | pk, autoincremental | Identificador único |
-| `activo_id` | integer | ref: activos.id | Activo que cambió |
-| `usuario_id` | integer | ref: usuarios.id | Quién hizo el cambio |
-| `estado_anterior` | estado_activo | | Estado antes del cambio |
-| `estado_nuevo` | estado_activo | | Estado después del cambio |
-| `motivo` | text | | Razón del cambio |
-| `fecha_cambio` | timestamp | default: now() | Cuándo ocurrió |
-
-### auditoria_sistema
-
-Registro general de acciones en el sistema: logins, creaciones, eliminaciones, etc.
+Renombrada de `auditoria_sistema`. Registra acciones relevantes de los usuarios. El campo `timestamp` pasó a `ocurrido_en` para evitar conflicto con la palabra reservada.
 
 | Campo | Tipo | Restricciones | Descripción |
 |---|---|---|---|
 | `id` | integer | pk, autoincremental | Identificador único |
+| `empresa_id` | integer | ref: empresas.id, not null | Empresa a la que pertenece |
 | `usuario_id` | integer | ref: usuarios.id | Usuario que ejecutó la acción |
 | `accion` | varchar | not null | Tipo de acción (ej: `login`, `create_ot`) |
 | `detalles` | jsonb | | Datos adicionales en formato JSON |
 | `ip_address` | varchar | | Dirección IP del usuario |
-| `timestamp` | timestamp | default: now() | Cuándo ocurrió |
+| `ocurrido_en` | timestamp | default: now() | Cuándo ocurrió |
+
+### logs_estados_activos
+
+Rastrea los cambios de estado de los activos.
+
+| Campo | Tipo | Restricciones | Descripción |
+|---|---|---|---|
+| `id` | integer | pk, autoincremental | Identificador único |
+| `empresa_id` | integer | ref: empresas.id, not null | Empresa a la que pertenece |
+| `activo_id` | integer | ref: activos.id, not null | Activo que cambió |
+| `usuario_id` | integer | ref: usuarios.id | Quién hizo el cambio |
+| `estado_anterior` | estado_activo | | Estado antes del cambio |
+| `estado_nuevo` | estado_activo | not null | Estado después del cambio |
+| `motivo` | text | | Razón del cambio |
+| `fecha_cambio` | timestamp | default: now() | Cuándo ocurrió |
+
+### logs_estados_ordenes_trabajo
+
+Rastrea cada transición de estado en las órdenes de trabajo.
+
+| Campo | Tipo | Restricciones | Descripción |
+|---|---|---|---|
+| `id` | integer | pk, autoincremental | Identificador único |
+| `empresa_id` | integer | ref: empresas.id, not null | Empresa a la que pertenece |
+| `ordenes_trabajo_id` | integer | ref: ordenes_trabajo.id, not null | Orden de trabajo |
+| `usuario_id` | integer | ref: usuarios.id | Quién hizo el cambio |
+| `estado_anterior` | estado_orden_trabajo | | Estado antes del cambio |
+| `estado_nuevo` | estado_orden_trabajo | not null | Estado después del cambio |
+| `motivo` | text | | Razón del cambio |
+| `fecha_cambio` | timestamp | default: now() | Cuándo ocurrió |
 
 ---
 
 ## Resumen de relaciones
 
 ```
-usuarios ──< usuario_roles >── roles ──< role_permisos >── permisos
+empresas ──< plan_id: planes_suscripcion (contrata un plan)
+
+usuarios ── preferencias_usuarios (relación 1:1)
+usuarios ──< roles_usuarios >── roles
+roles ──< permisos (CRUD por rol + módulo)
 
 ubicaciones ──< ubicaciones (self-ref, jerarquía)
 
-categorias_articulos ──< categorias_articulos (self-ref, jerarquía)
 categorias_articulos ──< articulos_catalogo ──< activos
+proveedores ──< inventario_repuestos
 
-activos ──< planes_mantenimiento ──< ordenes_trabajo
-activos ──< reportes_falla ──< ordenes_trabajo
+activos ──< planes_mantenimiento ──< planes_ejecuciones >── ordenes_trabajo
+activos ──< reportes_fallas ──< ordenes_trabajo
 activos ──< logs_estados_activos
 
-ordenes_trabajo ──< ot_tecnicos_asignados >── usuarios
+ordenes_trabajo ──< tecnicos_ordenes_trabajo >── usuarios
 ordenes_trabajo ──< intervenciones_tecnicas >── usuarios
 intervenciones_tecnicas ──< repuestos_utilizados >── inventario_repuestos
+ordenes_trabajo ──< logs_estados_ordenes_trabajo
 
-proveedores ──< inventario_repuestos ──< entradas_inventario
-proveedores ──< entradas_inventario
+inventario_repuestos ──< entradas_inventario >── ordenes_trabajo (movimientos)
+
+auditorias_sistema (registro general de acciones)
 ```
 
-> [!TIP]
-> Si necesitas ver el esquema completo en formato DBML, consulta [gema-dbml-v0](/docs/analisis/database/gema-dbml-v0).
+Todas las tablas de inquilino (excepto las intermedias) heredan de `empresas` mediante `empresa_id`.
+
+---
+
+## Cambios respecto al MVP
+
+| Categoría | Detalle |
+|---|---|
+| Capa multitenant | Nuevas tablas `empresas` y `planes_suscripcion`; `empresa_id` en todas las tablas de inquilino |
+| Enums nuevos | `tipo_ubicacion`, `modulo_permiso`, `estado_empresa`, `prioridad_nivel`, `estado_reporte` |
+| Enums nativos | Todos los enums se definen como tipos nativos de PostgreSQL |
+| Tablas nuevas | `planes_suscripcion`, `empresas`, `preferencias_usuarios`, `planes_ejecuciones`, `tecnicos_ordenes_trabajo`, `intervenciones_tecnicas`, `repuestos_utilizados`, `logs_estados_ordenes_trabajo` |
+| Tablas renombradas | `auditoria_sistema` → `auditorias_sistema`, `reportes_falla` → `reportes_fallas` |
+| Firma digital | `validado_gerencia` (boolean) → `validado_por_id` + `fecha_validacion` |
+| Frecuencia eliminada | `frecuencia` (enum redundante) eliminado; `intervalo_dias` es not null como única fuente de verdad |
+| Integridad | Campos `text` → `varchar` en campos cortos; enums nativos en todas las tablas |
+| Timestamps | Todas las tablas ganan `created_at` y `updated_at` con `default: now()` |
+| Intervenciones y Repuestos | Incorporación de `intervenciones_tecnicas` y `repuestos_utilizados` para registrar horas hombre, tareas y consumos de materiales. |
+| Preferencias de usuario | Incorporación de la tabla `preferencias_usuarios` con relación 1:1 para almacenar preferencias visuales (tema). |
+
+### Funcionalidades diferidas
+
+Las siguientes mejoras identificadas durante el diseño no se incluyen en  y quedan para versiones posteriores:
+
+| Funcionalidad | Descripción |
+|---|---|
+| Multimoneda | Tabla `tasas_cambio` con histórico de tasas y campos multimoneda en `activos`, `ordenes_trabajo`, `inventario_repuestos` y `entradas_inventario` |
+| KPIs precalculados | Tablas `kpis_activos_mensuales` y `kpis_tecnicos_mensuales` con métricas de disponibilidad, MTBF, MTTR y rendimiento |
+| Alertas | Tabla `alertas` con soporte polimórfico para stock bajo, vencimiento de planes y otras notificaciones |
+| Auditoría granular | Tabla `auditorias_cambios` con registro campo por campo |
+| Configuración dinámica | Tabla `configuraciones_sistema` para parámetros clave-valor sin tocar código |
