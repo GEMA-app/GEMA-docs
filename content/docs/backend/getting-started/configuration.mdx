@@ -44,19 +44,17 @@ flowchart TD
 Puedes ver el estado actual de toda la configuración en tiempo de ejecución con el método `model_dump()` del objeto `settings`:
 
 ```python
-from src.app.infrastructure.config.settings import get_settings
+from app.infrastructure.config.settings import settings
 
-s = get_settings()
-s.model_dump()
+settings.model_dump()
 # → {"database_url": "...", "jwt_secret_key": "...", ...}
 ```
 
 Si solo te interesa una variable en concreto, accede a ella directamente como un atributo del objeto:
 
 ```python
-s = get_settings()
-s.jwt_secret_key   # → "tu-clave"
-s.app_env          # → "development"
+settings.JWT_SECRET_KEY   # → "tu-clave"
+settings.APP_ENV          # → "development"
 ```
 
 ## Variables de entorno
@@ -104,7 +102,7 @@ Controla aspectos globales del servidor FastAPI, los modos de depuración y el c
 |----------|-------------|-------------|
 | `APP_ENV` | Entorno de ejecución: `development` o `production` | `development` |
 | `APP_DEBUG` | Activa los logs de SQL en la consola | `true` |
-| `APP_TITLE` | Título del proyecto (aparece en `/docs`) | `GEMA Backend` |
+| `APP_TITLE` | Título del proyecto (aparece en `/docs`) | `SIGMA Backend` |
 | `APP_VERSION` | Versión actual de la API | `0.1.0` |
 | `STRICT_JSONAPI` | Exige `Content-Type: application/vnd.api+json` en todas las solicitudes | `true` |
 
@@ -134,16 +132,14 @@ Si una variable no se puede convertir al tipo esperado (por ejemplo, asignando u
 
 ## Acceder a la configuración desde el código
 
-En cualquier parte de la aplicación puedes obtener la instancia de configuración mediante la función `get_settings()`:
+En cualquier parte de la aplicación puedes obtener la instancia de configuración importando el objeto `settings`:
 
 ```python
-from src.app.infrastructure.config.settings import get_settings
-
-settings = get_settings()
+from app.infrastructure.config.settings import settings
 
 # Acceso directo a cualquier variable
-db_url = settings.database_url
-debug = settings.app_debug
+db_url = settings.DATABASE_URL
+debug = settings.APP_DEBUG
 ```
 
 Puedes usar `model_dump()` si necesitas la configuración completa como diccionario, o bien `model_dump_json()` si la requieres serializada en formato JSON.
