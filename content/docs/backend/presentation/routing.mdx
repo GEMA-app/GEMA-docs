@@ -12,66 +12,92 @@ Archivo: `src/app/presentation/api/v1/router.py`
 
 ```python
 from fastapi import APIRouter
-from app.presentation.api.v1.endpoints.auth import router as auth_router
 
+from app.presentation.api.v1.endpoints.assets import router as assets_router
+from app.presentation.api.v1.endpoints.auth import router as auth_router
+from app.presentation.api.v1.endpoints.companies import router as companies_router
+from app.presentation.api.v1.endpoints.locations import router as locations_router
+from app.presentation.api.v1.endpoints.roles import router as roles_router
 
 v1_router = APIRouter(prefix="/v1")
 v1_router.include_router(auth_router, prefix="/auth", tags=["auth"])
+v1_router.include_router(companies_router, prefix="/companies", tags=["companies"])
+v1_router.include_router(roles_router, prefix="/companies/{company_id}/roles", tags=["roles"])
+v1_router.include_router(assets_router, prefix="/companies/{company_id}/assets", tags=["assets"])
+v1_router.include_router(locations_router, prefix="/companies/{company_id}/locations", tags=["locations"])
 ```
 
-El `v1_router` usa `prefix="/v1"` para que todas las rutas dentro de él
-comiencen con `/v1`. Luego `include_router` monta cada módulo con su
-propio prefijo:
+El `v1_router` monta las rutas agrupadas por contexto, anidando la mayoría bajo el prefijo de `/companies/{company_id}` para garantizar que el aislamiento multi-tenant sea visible en la URL de los recursos del negocio (Roles, Activos, Ubicaciones).
 
-- `auth_router` montado en `/auth` → rutas quedan como `/v1/auth/register`,
-  `/v1/auth/login`, etc.
+---
+
+## Tabla de Endpoints
+
+### Módulo Auth (`/v1/auth`)
+- `POST /register` — Registro onboarding (SaaS).
+- `POST /login` — Inicio de sesión.
+- `POST /logout` — Cierre de sesión (revoca token).
+- `POST /refresh` — Rota tokens de acceso/refresco.
+- `GET /me` — Obtener datos de usuario en sesión.
+
+### Módulo Company (`/v1/companies`)
+- `POST /` — Registrar una empresa independiente.
+- `GET /` — Listar empresas paginadas (Global Admin).
+- `GET /{id}` — Detalle de una empresa.
+- `PATCH /{id}` — Actualizar datos de empresa.
+- `DELETE /{id}` — Eliminar una empresa.
+
+### Módulo Role (`/v1/companies/{company_id}/roles`)
+- `POST /` — Crear un rol con permisos.
+- `GET /` — Listar todos los roles de la empresa.
+- `GET /{id}` — Detalle de un rol.
+- `PATCH /{id}` — Actualizar rol y permisos.
+- `DELETE /{id}` — Eliminar un rol.
+- `POST /{id}/assign` — Asignar rol a usuario.
+- `DELETE /{id}/revoke` — Revocar rol de usuario.
+
+### Módulo Location (`/v1/companies/{company_id}/locations`)
+- `POST /` — Crear ubicación (sometida a reglas de jerarquía).
+- `GET /` — Obtener el árbol jerárquico de ubicaciones completo (CTE).
+- `GET /{id}` — Detalle de una ubicación.
+- `PATCH /{id}` — Actualizar ubicación.
+- `DELETE /{id}` — Eliminar ubicación.
+- `GET /{id}/children` — Obtener ubicaciones hijas directas.
+
+### Módulo Asset (`/v1/companies/{company_id}/assets`)
+- `POST /` — Crear un activo físico.
+- `GET /` — Listar activos filtrados y paginados.
+- `GET /{id}` — Detalle de un activo.
+- `PATCH /{id}` — Actualizar datos de un activo.
+- `DELETE /{id}` — Eliminar un activo.
+
+---
 
 ## Registro en `main.py`
 
 Archivo: `src/app/main.py`
 
 ```python
-from app.presentation.api.v1.endpoints.health import router as health_router
-from app.presentation.api.v1.router import v1_router
-from app.presentation.exception_handlers import register_exception_handlers
-from app.presentation.middlewares.accept import AcceptMiddleware
-from app.presentation.middlewares.content_type import ContentTypeMiddleware
-from app.presentation.middlewares.rate_limit import RateLimitMiddleware
-from app.presentation.middlewares.request_id import RequestIdMiddleware
-
-
 app = FastAPI(title=settings.APP_TITLE, version=settings.APP_VERSION, lifespan=lifespan)
 
 register_exception_handlers(app)
 
-# El último middleware registrado se ejecuta primero
-app.add_middleware(RateLimitMiddleware)
+# Middlewares
+app.add_middleware(RateLimitMiddleware, redis_client=redis_client)
 app.add_middleware(AcceptMiddleware)
-app.add_middleware(ContentTypeMiddleware)
+app.add_middleware(ContentTypeMiddleware, strict_jsonapi=settings.STRICT_JSONAPI)
 app.add_middleware(RequestIdMiddleware)
 
+# Enrutadores
 app.include_router(health_router)
 app.include_router(v1_router)
 ```
 
-> [!TIP]
-> El orden de `add_middleware()` es inverso al de ejecución. El último
-> registrado se ejecuta primero. Aquí el orden real es: RateLimit → Accept
-> → ContentType → RequestId.
+<Callout type="info">
 
-## Cómo agregar una ruta nueva
+El orden de `add_middleware()` es inverso al de ejecución en FastAPI. El último registrado se ejecuta primero. Aquí el orden real es: RateLimit → Accept → ContentType → RequestId.
 
-1. Crea o modifica el archivo en `presentation/api/v1/endpoints/`.
-2. Si es un módulo nuevo, agrega `include_router` en `router.py`.
-3. El endpoint ya queda disponible bajo el prefijo `/v1`.
-
-Por ejemplo, un router nuevo `profile` se registra así:
-
-```python
-v1_router.include_router(profile_router, prefix="/profile", tags=["profile"])
-```
-
-Y queda accesible como `/v1/profile/...`.
+</Callout>
 
 ## Próximos pasos
 

@@ -3,30 +3,23 @@ title: Entidades
 description: La entidad User, identidad, propiedades, comportamiento e invariantes
 ---
 
-Esta página explica cómo se implementa la entidad `User`, qué invariantes
-mantiene y cómo se comporta.
+Esta página explica cómo se implementan las entidades en GEMA, qué invariantes mantienen y cómo se comportan.
 
 ## ¿Qué es una entidad?
 
-Una entidad es un objeto del dominio que tiene **identidad propia**. Dos
-entidades con los mismos atributos pero diferente identidad son objetos
-distintos. En este proyecto la única entidad es `User`.
+Una entidad es un objeto del dominio que tiene **identidad propia**. Dos entidades con los mismos atributos pero diferente identidad son objetos distintos. Las entidades del proyecto viven en el paquete `src/app/domain/entities/`.
 
-> [!NOTE]
-> La diferencia clave entre una entidad y un value object es la identidad.
-> `User` es entidad porque importa **quién** es (UserId). `Email` es value
-> object porque importa **qué** valor tiene, no quién lo posee.
+<Callout type="info">
+
+La diferencia clave entre una entidad y un value object es la identidad. `User` es entidad porque importa **quién** es (`UserId`). `Permission` es value object (implementado como dataclass inmutable) porque importa **qué** permisos tiene, no quién es.
+
+</Callout>
 
 ## La entidad `User`
 
-Vive en `src/app/domain/entities.py`:
+Representa a un usuario de la plataforma GEMA. Está vinculado a una empresa y tiene roles asociados. Vive en `src/app/domain/entities/user.py`:
 
 ```python
-from app.domain.exceptions import UserInactiveError
-from app.domain.value_objects import Email, HashedPassword, UserId
-from app.domain.events import DomainEvent, UserLoggedIn, UserRegistered
-
-
 class User:
     """Entidad de dominio rica que representa a un usuario en el sistema."""
 
@@ -35,80 +28,220 @@ class User:
         id: UserId,
         email: Email,
         hashed_password: HashedPassword,
+        empresa_id: CompanyId,
+        nombre: str,
+        telefono: str | None = None,
         is_active: bool = True,
-        created_at: Optional[datetime] = None,
-        updated_at: Optional[datetime] = None,
+        roles: list[Role] | None = None,
+        created_at: datetime | None = None,
+        updated_at: datetime | None = None,
     ) -> None:
         self.id = id
         self.email = email
         self.hashed_password = hashed_password
+        self.empresa_id = empresa_id
+        self.nombre = nombre
+        self.telefono = telefono
         self.is_active = is_active
-        self.created_at = created_at or datetime.now(timezone.utc)
-        self.updated_at = updated_at or datetime.now(timezone.utc)
+        self.roles = roles or []
+        self.created_at = created_at or datetime.now(UTC)
+        self.updated_at = updated_at or datetime.now(UTC)
         self._events: list[DomainEvent] = []
 
     @classmethod
-    def register(cls, email: Email, hashed_password: HashedPassword) -> "User":
+    def register(
+        cls,
+        email: Email,
+        hashed_password: HashedPassword,
+        empresa_id: CompanyId,
+        nombre: str,
+        telefono: str | None = None,
+    ) -> "User":
         user_id = UserId(value=uuid.uuid4())
         user = cls(
-            id=user_id, email=email, hashed_password=hashed_password,
+            id=user_id,
+            email=email,
+            hashed_password=hashed_password,
+            empresa_id=empresa_id,
+            nombre=nombre,
+            telefono=telefono,
             is_active=True,
+            roles=[],
         )
-        user._events.append(
-            UserRegistered(user_id=str(user.id), email=user.email.value)
-        )
+        user._events.append(UserRegistered(user_id=str(user.id), email=user.email.value))
         return user
 
     def login(self) -> None:
         if not self.is_active:
-            raise UserInactiveError(
-                f"El usuario {self.email.value} está inactivo."
-            )
-        self._events.append(
-            UserLoggedIn(user_id=str(self.id), email=self.email.value)
-        )
-
-    def pull_events(self) -> list[DomainEvent]:
-        events = self._events.copy()
-        self._events.clear()
-        return events
+            raise UserInactiveError(f"El usuario {self.email.value} está inactivo.")
+        self._events.append(UserLoggedIn(user_id=str(self.id), email=user.email.value))
 ```
 
-## Constructor vs factory method
+### Invariantes de `User`
+- Un usuario inactivo no puede iniciar sesión.
+- Su identificador `id` y su `empresa_id` deben ser VOs de tipo `UserId` y `CompanyId` válidos.
 
-| Vía | Cuándo usarla |
-|---|---|
-| `User.__init__()` | Cuando reconstruyes un usuario desde la base de datos. El repositorio llama a `User(...)` con todos los valores existentes. |
-| `User.register()` | Cuando creas un usuario nuevo. Genera un `UserId` automáticamente, asigna `is_active=True` y emite `UserRegistered`. |
+---
 
-El constructor es bajo nivel: asigna propiedades sin validar el contexto.
-El factory method `register()` asegura que un usuario nuevo siempre
-arranque activo y emita su evento de registro.
+## La entidad `Company` (Tenant)
 
-## Invariantes
+GEMA es una plataforma multi-tenant aislada. Cada empresa representa un tenant independiente. Vive en `src/app/domain/entities/company.py`:
 
-Las invariantes son condiciones que siempre se cumplen:
+```python
+@dataclass
+class Company:
+    """Entidad que representa una Empresa (Tenant) en la plataforma GEMA."""
 
-- Un usuario inactivo **no puede** iniciar sesión. `User.login()` lanza
-  `UserInactiveError` si `is_active` es `False`.
-- El email de un usuario **siempre** es un `Email` válido (se valida en el
-  value object).
-- La contraseña almacenada **siempre** es un `HashedPassword` (nunca texto
-  plano).
+    id: CompanyId
+    nombre: str
+    slug: Slug
+    rif: str | None = None
+    email_contacto: str | None = None
+    estado: CompanyStatus = CompanyStatus.ACTIVE
+    plan_id: uuid.UUID | None = None
+    trial_hasta: date | None = None
 
-## Eventos que emite
+    @classmethod
+    def create(
+        cls,
+        nombre: str,
+        slug: Slug,
+        rif: str | None = None,
+        email_contacto: str | None = None,
+        plan_id: uuid.UUID | None = None,
+        trial_hasta: date | None = None,
+        estado: CompanyStatus = CompanyStatus.ACTIVE,
+    ) -> "Company":
+        if not nombre or not nombre.strip():
+            raise ValueError("El nombre de la empresa no puede estar vacío.")
 
-La entidad acumula eventos internamente y los expone mediante
-`pull_events()`. Cada llamada devuelve los eventos pendientes y limpia la
-lista interna.
+        company_id = CompanyId(value=uuid.uuid4())
+        company = cls(
+            id=company_id,
+            nombre=nombre.strip(),
+            slug=slug,
+            rif=rif,
+            email_contacto=email_contacto,
+            estado=estado,
+            plan_id=plan_id,
+            trial_hasta=trial_hasta,
+        )
+        company._events.append(
+            CompanyCreated(
+                company_id=str(company.id), nombre=company.nombre, slug=company.slug.value
+            )
+        )
+        return company
+```
 
-| Método | Evento que emite |
-|---|---|
-| `User.register()` | `UserRegistered` |
-| `User.login()` | `UserLoggedIn` |
+---
+
+## La entidad `Role` y el VO `Permission` (RBAC)
+
+El control de acceso basado en roles (RBAC) se maneja a nivel de dominio. Un rol pertenece a una empresa y tiene una lista de permisos para diferentes módulos del sistema. Viven en `src/app/domain/entities/role.py` y `permission.py`:
+
+```python
+@dataclass
+class Role:
+    id: RoleId
+    empresa_id: CompanyId
+    nombre: str
+    descripcion: str
+    permisos: list[Permission] = field(default_factory=list)
+
+    def has_permission(self, module: PermissionModule, action: str) -> bool:
+        """Verifica si el rol tiene el permiso solicitado para un módulo.
+        action: 'view' | 'create' | 'edit' | 'delete'
+        """
+        for p in self.permisos:
+            if p.module == module:
+                if action == "view": return p.can_view
+                elif action == "create": return p.can_create
+                elif action == "edit": return p.can_edit
+                elif action == "delete": return p.can_delete
+        return False
+```
+
+### El Objeto de Valor `Permission`
+Es una dataclass inmutable (`frozen=True`) que encapsula los permisos CRUD para un módulo:
+```python
+@dataclass(frozen=True)
+class Permission:
+    module: PermissionModule
+    can_view: bool = False
+    can_create: bool = False
+    can_edit: bool = False
+    can_delete: bool = False
+```
+
+---
+
+## La entidad `Location` (Ubicaciones Jerárquicas)
+
+Representa las ubicaciones físicas del inventario y los activos. Se organiza como un árbol jerárquico y valida las relaciones entre los tipos de sedes, plantas, áreas y secciones. Vive en `src/app/domain/entities/location.py`:
+
+```python
+@dataclass
+class Location:
+    id: LocationId
+    empresa_id: CompanyId
+    parent_id: LocationId | None
+    nombre: str
+    tipo: LocationType
+    descripcion: str | None = None
+
+    @staticmethod
+    def validate_hierarchy(tipo: LocationType, parent_tipo: LocationType | None) -> None:
+        """Valida que la jerarquía de tipos de ubicación sea correcta."""
+        if tipo == LocationType.HEADQUARTERS and parent_tipo is not None:
+            raise LocationInvalidTypeHierarchyError("Una sede (HEADQUARTERS) no puede tener padre.")
+        elif tipo == LocationType.PLANT and parent_tipo != LocationType.HEADQUARTERS:
+            raise LocationInvalidTypeHierarchyError("Una planta (PLANT) debe tener una sede (HEADQUARTERS) como padre.")
+        elif tipo == LocationType.AREA and parent_tipo != LocationType.PLANT:
+            raise LocationInvalidTypeHierarchyError("Un área (AREA) debe tener una planta (PLANT) como padre.")
+        elif tipo == LocationType.SECTION and parent_tipo != LocationType.AREA:
+            raise LocationInvalidTypeHierarchyError("Una sección (SECTION) debe tener un área (AREA) como padre.")
+```
+
+---
+
+## La entidad `Asset` (Activos Físicos)
+
+Representa un activo físico que está asignado a una ubicación jerárquica y que pertenece al tenant (empresa). Vive en `src/app/domain/entities/asset.py`:
+
+```python
+@dataclass
+class Asset:
+    id: AssetId
+    empresa_id: CompanyId
+    articulo_id: uuid.UUID
+    ubicacion_id: LocationId | None
+    serial_interno: str
+    codigo_activo: str
+    estado: AssetStatus
+    fecha_adquisicion: date | None = None
+    valor_monetario: float | None = None
+    moneda: str = "USD"
+```
+
+---
+
+## Placeholders de Catálogo
+
+Para satisfacer las referencias de llaves foráneas de activos en este sprint sin implementar Use Cases completos, se añadieron modelos ORM y entidades mínimas en `src/app/domain/entities/catalog.py`:
+- `ArticleCategory`: Representa la categoría del artículo.
+- `CatalogArticle`: Representa los datos técnicos del artículo (fabricante, modelo, etc.).
+
+## Eventos que emite el Dominio
+
+Las entidades acumulan eventos internamente que se recuperan mediante `pull_events()`.
+
+| Entidad | Método / Acción | Evento que emite |
+|---|---|---|
+| `User` | `User.register()` | `UserRegistered` |
+| `User` | `User.login()` | `UserLoggedIn` |
+| `Company` | `Company.create()` | `CompanyCreated` |
 
 ## Próximos pasos
 
-Los [Value objects](./value-objects) son los componentes que usa `User`
-como propiedades. Léelos para entender las validaciones de email,
-contraseña y UUID.
+Los [Value objects](./value-objects) son los componentes que usan las entidades como propiedades. Léelos para entender las validaciones de correos, contraseñas, slugs y UUIDs.

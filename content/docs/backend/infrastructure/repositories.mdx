@@ -6,99 +6,91 @@ description: SqlAlchemyUserRepository, persistencia, consultas y mapeo entidad �
 Los repositorios implementan los puertos definidos en `application/ports/`
 y traducen entre entidades de dominio y modelos ORM.
 
-## `SqlAlchemyUserRepository`
+## Repositorio Base Genérico: `SqlAlchemyRepository`
 
-Archivo: `src/app/infrastructure/repositories/user_repository.py`
+Archivo: `src/app/infrastructure/repositories/base.py`
 
-Implementa `UserRepositoryPort` usando SQLAlchemy 2.0 y `asyncpg`.
+Para evitar escribir repetidamente métodos CRUD básicos (`save`, `get_by_id`, `delete`), se implementa una clase abstracta genérica:
 
 ```python
-class SqlAlchemyUserRepository(UserRepositoryPort):
+class SqlAlchemyRepository(Generic[ModelT, EntityT, IdT], ABC):
+    """Repositorio base con operaciones CRUD genéricas utilizando SQLAlchemy 2.0."""
 
-    def __init__(self, session: AsyncSession) -> None:
+    def __init__(self, session: AsyncSession, model_class: type[ModelT]) -> None:
         self.session = session
+        self.model_class = model_class
+
+    @abstractmethod
+    def _to_model(self, entity: EntityT) -> ModelT: ...
+
+    @abstractmethod
+    def _to_entity(self, model: ModelT) -> EntityT: ...
+
+    async def save(self, entity: EntityT) -> None:
+        model = self._to_model(entity)
+        await self.session.merge(model)
+
+    async def get_by_id(self, id: IdT) -> EntityT | None:
+        id_val = id.value if hasattr(id, "value") else id
+        stmt = select(self.model_class).where(self.model_class.id == id_val)
+        result = await self.session.execute(stmt)
+        model = result.scalar_one_or_none()
+        if not model: return None
+        return self._to_entity(model)
+
+    async def delete(self, id: IdT) -> None:
+        id_val = id.value if hasattr(id, "value") else id
+        stmt = delete(self.model_class).where(self.model_class.id == id_val)
+        await self.session.execute(stmt)
 ```
 
-Recibe la sesión en el constructor. La sesión es creada por el Unit of Work
-(ver [Unit of Work](../application/unit-of-work)).
+---
 
-### `save()`
+## Repositorios Implementados
 
-```python
-async def save(self, user: User) -> None:
-    model = self._to_model(user)
-    await self.session.merge(model)
-```
+Todos viven en `src/app/infrastructure/repositories/`.
 
-Usa `session.merge()` que funciona tanto para insert como para update. El
-método **nunca** hace `session.commit()`. Solo agrega el cambio a la
-transacción actual.
+### 1. `SqlAlchemyUserRepository`
+Hereda de `SqlAlchemyRepository` e implementa `UserRepositoryPort`.
+- Mapea el nuevo `empresa_id` y los roles asociados de un usuario.
+- Añade el método `get_by_email_and_company(email, empresa_id)`.
 
-### `get_by_email()` y `get_by_id()`
+### 2. `SqlAlchemyCompanyRepository`
+Implementa `CompanyRepositoryPort`.
+- Añade el método `get_by_slug(slug)` y listado paginado global para administración.
 
-```python
-async def get_by_email(self, email: Email) -> Optional[User]:
-    stmt = select(UserModel).where(UserModel.email == email.value)
-    result = await self.session.execute(stmt)
-    model = result.scalar_one_or_none()
-    if not model:
-        return None
-    return self._to_entity(model)
+### 3. `SqlAlchemyRoleRepository`
+Implementa `RoleRepositoryPort`.
+- Permite asignar/revocar roles de usuarios operando sobre la tabla asociativa `roles_usuarios`.
+- Carga los permisos embebidos de manera eager para optimizar el chequeo de RBAC.
 
+### 4. `SqlAlchemyAssetRepository`
+Implementa `AssetRepositoryPort`.
+- Realiza consultas filtradas por `empresa_id`, `estado`, e `ubicacion_id` con paginación integrada.
 
-async def get_by_id(self, id: UserId) -> Optional[User]:
-    stmt = select(UserModel).where(UserModel.id == id.value)
-    result = await self.session.execute(stmt)
-    model = result.scalar_one_or_none()
-    if not model:
-        return None
-    return self._to_entity(model)
-```
-
-Ambos usan `select()` + `scalar_one_or_none()`. Si no hay resultado,
-devuelven `None`.
-
-### Traducción entidad ↔ modelo
+### 5. `SqlAlchemyLocationRepository` (CTE Recursiva)
+Implementa `LocationRepositoryPort`.
+Para obtener el árbol jerárquico completo en una sola consulta de base de datos sin sobrecargar la memoria de la aplicación, el repositorio implementa una **CTE (Common Table Expression) recursiva**:
 
 ```python
-def _to_model(self, user: User) -> UserModel:
-    return UserModel(
-        id=user.id.value,
-        email=user.email.value,
-        hashed_password=user.hashed_password.value,
-        is_active=user.is_active,
-        created_at=user.created_at,
-        updated_at=user.updated_at,
+async def get_tree(self, empresa_id: CompanyId) -> list[Location]:
+    # 1. Caso base: seleccionar ubicaciones raíz (parent_id es NULL)
+    base_stmt = select(LocationModel).where(
+        LocationModel.empresa_id == empresa_id.value,
+        LocationModel.parent_id.is_(None)
     )
-
-def _to_entity(self, model: UserModel) -> User:
-    return User(
-        id=UserId(value=model.id),
-        email=Email(value=model.email),
-        hashed_password=HashedPassword(value=model.hashed_password),
-        is_active=model.is_active,
-        created_at=model.created_at,
-        updated_at=model.updated_at,
-    )
+    # 2. Paso recursivo: hacer join con el caso base anterior
+    # ...
+    # 3. Ejecutar y mapear resultados a entidades de dominio
 ```
 
-Cada value object se extrae con `.value` al convertir a modelo, y se
-reconstruye pasando el valor al constructor al convertir a entidad.
+Esto garantiza un rendimiento eficiente y una validación de ciclos integrada a nivel de base de datos.
 
-> [!WARNING]
-> El repositorio **nunca** hace `session.commit()`. Solo usa
-> `session.add()` o `session.merge()`. El commit es responsabilidad
-> exclusiva del Unit of Work. Si un repositorio hiciera commit, rompería
-> la frontera transaccional.
+<Callout type="warn">
 
-## Flujo completo
+El repositorio **nunca** hace `session.commit()`. Solo usa `session.add()` o `session.merge()`. El commit es responsabilidad exclusiva del Unit of Work. Si un repositorio hiciera commit, rompería la frontera transaccional.
 
-```
-Caso de uso
-  → async with self.uow:
-      → uow.users.save(user)    ← add/merge, no commit
-      → await uow.commit()      ← aquí se hace el commit real
-```
+</Callout>
 
 ## Próximos pasos
 

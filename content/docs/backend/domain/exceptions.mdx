@@ -9,65 +9,41 @@ infraestructura ni la presentación.
 
 ## Jerarquía
 
-Todas las excepciones viven en `src/app/domain/exceptions.py`:
+Todas las excepciones viven en el paquete `src/app/domain/exceptions/`:
 
 ```
-DomainException          ← Base de todas
-└── AuthException        ← Base del módulo de autenticación
-    ├── WeakPasswordError
-    ├── InvalidEmailError
-    ├── UserAlreadyExistsError
-    ├── InvalidCredentialsError
-    ├── UserInactiveError
-    └── InvalidTokenError
-```
-
-```python
-class DomainException(Exception):
-    """Clase base para todas las excepciones del dominio."""
-    pass
-
-
-class AuthException(DomainException):
-    """Clase base para excepciones del módulo de autenticación."""
-    pass
-
-
-class WeakPasswordError(AuthException):
-    """Lanzada cuando la contraseña no cumple con las reglas de complejidad."""
-    pass
-
-
-class InvalidEmailError(AuthException):
-    """Lanzada cuando el correo electrónico tiene un formato inválido."""
-    pass
-
-
-class UserAlreadyExistsError(AuthException):
-    """Lanzada cuando se intenta registrar un email ya registrado."""
-    pass
-
-
-class InvalidCredentialsError(AuthException):
-    """Lanzada cuando el correo o la contraseña son incorrectos."""
-    pass
-
-
-class UserInactiveError(AuthException):
-    """Lanzada cuando un usuario inactivo intenta una acción."""
-    pass
-
-
-class InvalidTokenError(AuthException):
-    """Lanzada cuando un token es inválido, revocado o expiró."""
-    pass
+DomainException                    ← Base de todas
+├── AuthException                  ← Base de autenticación y usuarios
+│   ├── WeakPasswordError
+│   ├── InvalidEmailError
+│   ├── UserAlreadyExistsError
+│   ├── InvalidCredentialsError
+│   ├── UserInactiveError
+│   └── InvalidTokenError
+├── CompanyException               ← Base del módulo de empresas
+│   ├── CompanyNotFoundError
+│   └── CompanySlugExistsError
+├── RoleException                  ← Base del módulo de roles
+│   ├── RoleNotFoundError
+│   └── RoleNameExistsError
+├── PermissionException            ← Base de autorización
+│   └── InsufficientPermissionsError
+├── AssetException                 ← Base del módulo de activos
+│   ├── AssetNotFoundError
+│   ├── AssetCodeExistsError
+│   └── AssetSerialExistsError
+├── LocationException              ← Base de ubicaciones
+│   ├── LocationNotFoundError
+│   ├── LocationCircularReferenceError
+│   └── LocationInvalidTypeHierarchyError
+└── ValidationException            ← Errores de validación generales
 ```
 
 ## Mapeo a respuestas HTTP
 
-El archivo `src/app/presentation/exception_handlers.py` traduce cada
+El módulo `src/app/presentation/exception_handlers/domain.py` traduce cada
 excepción de dominio a un código HTTP y un código interno en formato
-JSON:API:
+JSON:API usando un registro declarativo `_EXCEPTION_MAP`:
 
 | Excepción | HTTP status | Código interno | Dónde se lanza |
 |---|---|---|---|
@@ -76,14 +52,26 @@ JSON:API:
 | `UserAlreadyExistsError` | 409 | `ERR_USER_ALREADY_EXISTS` | Caso de uso `register_user` |
 | `InvalidCredentialsError` | 401 | `ERR_INVALID_CREDENTIALS` | Caso de uso `login_user` |
 | `UserInactiveError` | 403 | `ERR_USER_INACTIVE` | `User.login()` |
-| `InvalidTokenError` | 401 | `ERR_INVALID_TOKEN` | Casos de uso que decodifican tokens |
+| `InvalidTokenError` | 401 | `ERR_INVALID_TOKEN` | Casos de uso de autenticación |
+| `CompanyNotFoundError` | 404 | `ERR_COMPANY_NOT_FOUND` | Casos de uso de empresas |
+| `CompanySlugExistsError` | 409 | `ERR_COMPANY_SLUG_EXISTS` | Caso de uso `create_company` |
+| `RoleNotFoundError` | 404 | `ERR_ROLE_NOT_FOUND` | Casos de uso de roles |
+| `RoleNameExistsError` | 409 | `ERR_ROLE_NAME_EXISTS` | Caso de uso `create_role` |
+| `InsufficientPermissionsError` | 403 | `ERR_INSUFFICIENT_PERMISSIONS` | `RbacAuthorizationService` |
+| `AssetNotFoundError` | 404 | `ERR_ASSET_NOT_FOUND` | Casos de uso de activos |
+| `AssetCodeExistsError` | 409 | `ERR_ASSET_CODE_EXISTS` | Caso de uso `create_asset` |
+| `AssetSerialExistsError` | 409 | `ERR_ASSET_SERIAL_EXISTS` | Caso de uso `create_asset` |
+| `LocationNotFoundError` | 404 | `ERR_LOCATION_NOT_FOUND` | Casos de uso de ubicaciones |
+| `LocationCircularReferenceError` | 422 | `ERR_LOCATION_CIRCULAR_REFERENCE` | `LocationRepository` (validación de ciclos) |
+| `LocationInvalidTypeHierarchyError` | 422 | `ERR_LOCATION_INVALID_TYPE_HIERARCHY` | `Location.validate_hierarchy` |
+| `ValidationException` | 422 | `ERR_VALIDATION` | Validaciones generales |
 | `RequestValidationError` (Pydantic) | 422 | `ERR_VALIDATION` | Schemas de presentación |
 
-> [!TIP]
-> Si necesitas una excepción nueva, créala heredando de `AuthException` (o
-> de `DomainException` si no pertenece a autenticación) y agrega un `elif`
-> en `domain_exception_handler()` dentro de
-> `presentation/exception_handlers.py`.
+<Callout type="info">
+
+Si necesitas una excepción nueva, créala en su archivo correspondiente dentro del paquete `domain/exceptions/`, re-expórtala en `domain/exceptions/__init__.py` y agrégala al diccionario `_EXCEPTION_MAP` en `presentation/exception_handlers/domain.py`.
+
+</Callout>
 
 ## ¿Por qué excepciones propias?
 

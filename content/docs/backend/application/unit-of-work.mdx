@@ -13,8 +13,11 @@ El contrato se define en `src/app/application/ports/unit_of_work.py`:
 
 ```python
 class UnitOfWorkPort(Protocol):
-
     users: UserRepositoryPort
+    companies: CompanyRepositoryPort
+    roles: RoleRepositoryPort
+    assets: AssetRepositoryPort
+    locations: LocationRepositoryPort
 
     async def __aenter__(self) -> Self:
         ...
@@ -33,17 +36,16 @@ class UnitOfWorkPort(Protocol):
 
 Atributos clave:
 
-- `users` — el repositorio de usuarios. El UoW lo crea internamente con la
-  misma sesión.
+- `users`, `companies`, `roles`, `assets`, `locations` — los repositorios específicos. El UoW los crea internamente compartiendo la misma sesión transaccional.
 - `__aenter__` y `__aexit__` — lo convierten en async context manager.
-- `commit()` — confirma la transacción.
-- `rollback()` — deshace los cambios.
+- `commit()` — confirma la transacción de forma atómica.
+- `rollback()` — deshace cualquier cambio no guardado ante fallos.
 
 ## Comportamiento como context manager
 
 ```python
 async with self.uow:
-    await self.uow.users.save(user)
+    await self.uow.companies.save(company)
     await self.uow.commit()
     # si algo falla antes del commit, __aexit__ hace rollback
 ```
@@ -56,7 +58,7 @@ async with self.uow:
 
 La implementación concreta `SqlAlchemyUnitOfWork` (en
 `src/app/infrastructure/uow.py`) recibe una fábrica de sesiones y crea
-el repositorio internamente:
+todos los repositorios internamente en su método de entrada:
 
 ```python
 class SqlAlchemyUnitOfWork(UnitOfWorkPort):
@@ -70,6 +72,10 @@ class SqlAlchemyUnitOfWork(UnitOfWorkPort):
     async def __aenter__(self) -> Self:
         self.session = self.session_factory()
         self.users = SqlAlchemyUserRepository(self.session)
+        self.companies = SqlAlchemyCompanyRepository(self.session)
+        self.roles = SqlAlchemyRoleRepository(self.session)
+        self.assets = SqlAlchemyAssetRepository(self.session)
+        self.locations = SqlAlchemyLocationRepository(self.session)
         return self
 
     async def __aexit__(self, exc_type, exc_val, tb) -> None:
@@ -89,11 +95,14 @@ class SqlAlchemyUnitOfWork(UnitOfWorkPort):
 No se inyecta la sesión al repositorio y al UoW por separado. El UoW crea
 ambos con la misma sesión, garantizando que compartan la misma transacción.
 
-> [!WARNING]
-> El repositorio **nunca** hace `session.commit()`. Solo usa
-> `session.add()` o `session.merge()`. El `commit()` es responsabilidad
-> exclusiva del UoW. Si un repositorio hiciera commit, rompería la
-> frontera transaccional.
+<Callout type="warn">
+
+El repositorio **nunca** hace `session.commit()`. Solo usa
+`session.add()` o `session.merge()`. El `commit()` es responsabilidad
+exclusiva del UoW. Si un repositorio hiciera commit, rompería la
+frontera transaccional.
+
+</Callout>
 
 ## Uso en casos de uso
 

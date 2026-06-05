@@ -50,12 +50,15 @@ class JsonApiErrorDocument(BaseModel):
 
 Archivo: `src/app/presentation/api/v1/schemas/auth.py`
 
-Siguen una estructura de tres niveles para cada recurso:
+Siguen una estructura de tres niveles para cada recurso. Se ha modificado el esquema de registro para soportar el onboarding de SaaS:
 
 ```python
 # 1. Atributos del recurso
 class UserAttributes(BaseModel):
     email: str
+    nombre: str
+    empresa_id: str
+    telefono: str | None = None
     is_active: bool
     created_at: datetime
     updated_at: datetime
@@ -76,25 +79,45 @@ class UserDocument(BaseModel):
     meta: Optional[dict[str, Any]] = None
 ```
 
-Para las solicitudes (requests) el patrón es similar, pero sin `id` porque
-el servidor lo genera:
+Para las solicitudes de registro (`RegisterRequest`), se agregaron atributos correspondientes a la creación inicial de la empresa del usuario:
 
 ```python
 class RegisterAttributes(BaseModel):
-    email: str
-    password: str
-
-
-class RegisterResource(BaseModel):
-    type: str = "users"
-    attributes: RegisterAttributes
-
-
-class RegisterRequest(BaseModel):
-    data: RegisterResource
+    email: str = Field(..., description="Correo electrónico para registro")
+    password: str = Field(..., description="Contraseña en texto plano")
+    nombre: str = Field(..., description="Nombre completo del usuario")
+    company_name: str = Field(..., description="Nombre de la empresa a crear")
+    telefono: str | None = Field(None, description="Teléfono de contacto")
 ```
 
-## Patrón general
+---
+
+## Nuevos Schemas de Dominio
+
+### Módulo Company (`schemas/company.py`)
+Define `CompanyAttributes`, `CompanyResource` y `CompanyDocument` para representar el recurso `companies`.
+- Los atributos de entrada para creación/edición validan el nombre de la empresa y correos válidos para el contacto.
+
+### Módulo Role (`schemas/role.py`)
+Define el recurso `roles`. Incluye el sub-esquema `PermissionDTO` para estructurar la definición de permisos por módulo del sistema:
+```python
+class PermissionDTO(BaseModel):
+    module: str
+    can_view: bool = False
+    can_create: bool = False
+    can_edit: bool = False
+    can_delete: bool = False
+```
+
+### Módulo Location (`schemas/location.py`)
+Define el recurso `locations`. Los atributos incluyen `parent_id` (de tipo UUID o None). Soporta representación anidada del árbol jerárquico.
+
+### Módulo Asset (`schemas/asset.py`)
+Define el recurso `assets` con atributos de negocio: `articulo_id`, `ubicacion_id`, `serial_interno`, `codigo_activo`, `estado` (validado mediante enum), `fecha_adquisicion`, `valor_monetario`, `moneda`.
+
+---
+
+## Patrón general JSON:API
 
 Cada recurso sigue siempre la misma estructura:
 

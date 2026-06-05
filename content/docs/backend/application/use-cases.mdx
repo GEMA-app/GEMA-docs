@@ -6,21 +6,44 @@ description: RegisterUser, LoginUser, RefreshToken, LogoutUser y GetCurrentUser
 Los casos de uso orquestan las operaciones del sistema. Reciben un DTO de
 entrada, ejecutan la lógica usando los puertos y devuelven un DTO de salida.
 
-Todos viven en `src/app/application/use_cases/`.
+Todos viven en el paquete `src/app/application/use_cases/`.
 
 ## Tabla de casos de uso
 
-| Caso de uso | Método `execute()` | Recibe | Devuelve | ¿Usa UoW? |
-|---|---|---|---|---|
-| `RegisterUserUseCase` | `async def execute(self, request: RegisterUserRequest)` | DTO con email y password | `AuthTokensDTO` | Sí |
-| `LoginUserUseCase` | `async def execute(self, request: LoginUserRequest)` | DTO con email y password | `AuthTokensDTO` | Sí |
-| `RefreshTokenUseCase` | `async def execute(self, request: RefreshTokenRequest)` | DTO con refresh token | `AuthTokensDTO` | Sí |
-| `LogoutUserUseCase` | `async def execute(self, access_token: str)` | token string | `None` | No |
-| `GetCurrentUserUseCase` | `async def execute(self, access_token: str)` | token string | `UserResponse` | Sí |
+| Módulo | Caso de uso | Método `execute()` | Recibe | Devuelve | ¿Usa UoW? |
+|---|---|---|---|---|---|
+| **Auth** | `RegisterUserUseCase` | `async def execute(self, request: RegisterUserRequest)` | DTO con email, password, company_name, nombre, telefono | `AuthTokensDTO` | Sí |
+| **Auth** | `LoginUserUseCase` | `async def execute(self, request: LoginUserRequest)` | DTO con email y password | `AuthTokensDTO` | Sí |
+| **Auth** | `RefreshTokenUseCase` | `async def execute(self, request: RefreshTokenRequest)` | DTO con refresh token | `AuthTokensDTO` | Sí |
+| **Auth** | `LogoutUserUseCase` | `async def execute(self, access_token: str)` | token string | `None` | No |
+| **Auth** | `GetCurrentUserUseCase` | `async def execute(self, access_token: str)` | token string | `UserResponse` | Sí |
+| **Company** | `CreateCompanyUseCase` | `async def execute(self, request: CreateCompanyRequest)` | DTO con nombre, rif, email_contacto | `CompanyResponse` | Sí |
+| **Company** | `GetCompanyUseCase` | `async def execute(self, id: CompanyId)` | `CompanyId` | `CompanyResponse` | Sí |
+| **Company** | `ListCompaniesUseCase` | `async def execute(self, offset: int, limit: int)` | offset, limit | `tuple[list[CompanyResponse], int]` | Sí |
+| **Company** | `UpdateCompanyUseCase` | `async def execute(self, id: CompanyId, request: UpdateCompanyRequest)` | `CompanyId`, DTO con campos a actualizar | `CompanyResponse` | Sí |
+| **Company** | `DeleteCompanyUseCase` | `async def execute(self, id: CompanyId)` | `CompanyId` | `None` | Sí |
+| **Role** | `CreateRoleUseCase` | `async def execute(self, empresa_id: CompanyId, request: CreateRoleRequest)` | `CompanyId`, DTO del rol | `RoleResponse` | Sí |
+| **Role** | `GetRoleUseCase` | `async def execute(self, id: RoleId, empresa_id: CompanyId)` | `RoleId`, `CompanyId` | `RoleResponse` | Sí |
+| **Role** | `ListRolesUseCase` | `async def execute(self, empresa_id: CompanyId)` | `CompanyId` | `list[RoleResponse]` | Sí |
+| **Role** | `UpdateRoleUseCase` | `async def execute(self, id: RoleId, empresa_id: CompanyId, request: UpdateRoleRequest)` | `RoleId`, `CompanyId`, DTO | `RoleResponse` | Sí |
+| **Role** | `DeleteRoleUseCase` | `async def execute(self, id: RoleId, empresa_id: CompanyId)` | `RoleId`, `CompanyId` | `None` | Sí |
+| **Role** | `AssignRoleToUserUseCase` | `async def execute(self, role_id: RoleId, user_id: UserId, empresa_id: CompanyId)` | `RoleId`, `UserId`, `CompanyId` | `None` | Sí |
+| **Role** | `RevokeRoleFromUserUseCase` | `async def execute(self, role_id: RoleId, user_id: UserId, empresa_id: CompanyId)` | `RoleId`, `UserId`, `CompanyId` | `None` | Sí |
+| **Location** | `CreateLocationUseCase` | `async def execute(self, empresa_id: CompanyId, request: CreateLocationRequest)` | `CompanyId`, DTO de ubicación | `LocationResponse` | Sí |
+| **Location** | `GetLocationUseCase` | `async def execute(self, id: LocationId, empresa_id: CompanyId)` | `LocationId`, `CompanyId` | `LocationResponse` | Sí |
+| **Location** | `GetLocationTreeUseCase` | `async def execute(self, empresa_id: CompanyId)` | `CompanyId` | `list[LocationResponse]` (árbol) | Sí |
+| **Location** | `GetLocationChildrenUseCase` | `async def execute(self, parent_id: LocationId, empresa_id: CompanyId)` | `LocationId`, `CompanyId` | `list[LocationResponse]` | Sí |
+| **Location** | `UpdateLocationUseCase` | `async def execute(self, id: LocationId, empresa_id: CompanyId, request: UpdateLocationRequest)` | `LocationId`, `CompanyId`, DTO | `LocationResponse` | Sí |
+| **Location** | `DeleteLocationUseCase` | `async def execute(self, id: LocationId, empresa_id: CompanyId)` | `LocationId`, `CompanyId` | `None` | Sí |
+| **Asset** | `CreateAssetUseCase` | `async def execute(self, empresa_id: CompanyId, request: CreateAssetRequest)` | `CompanyId`, DTO de activo | `AssetResponse` | Sí |
+| **Asset** | `GetAssetUseCase` | `async def execute(self, id: AssetId, empresa_id: CompanyId)` | `AssetId`, `CompanyId` | `AssetResponse` | Sí |
+| **Asset** | `ListAssetsUseCase` | `async def execute(self, empresa_id: CompanyId, offset: int, limit: int, filters: dict)` | `CompanyId`, offset, limit, filtros | `tuple[list[AssetResponse], int]` | Sí |
+| **Asset** | `UpdateAssetUseCase` | `async def execute(self, id: AssetId, empresa_id: CompanyId, request: UpdateAssetRequest)` | `AssetId`, `CompanyId`, DTO | `AssetResponse` | Sí |
+| **Asset** | `DeleteAssetUseCase` | `async def execute(self, id: AssetId, empresa_id: CompanyId)` | `AssetId`, `CompanyId` | `None` | Sí |
 
 ## Estructura común
 
-Todos siguen el mismo patrón:
+Todos siguen el mismo patrón de orquestación pura:
 
 ```python
 class XxxUseCase:
@@ -34,12 +57,27 @@ class XxxUseCase:
         # 3. Retornar DTO
 ```
 
-## `RegisterUserUseCase`
+---
+
+## Flujo Onboarding: `RegisterUserUseCase`
+
+En un modelo multi-tenant SaaS, el registro de un nuevo usuario ejecuta un flujo de **Onboarding** en una sola transacción atómica:
+1. Valida que el email no esté registrado globalmente.
+2. Genera un `Slug` para la empresa y valida su unicidad.
+3. Crea la entidad `Company`.
+4. Crea la entidad `User` vinculada a la empresa con contraseña hasheada.
+5. Crea un rol **Administrador** por defecto con todos los permisos concedidos.
+6. Asigna el rol al usuario creado.
+7. Emite los tokens JWT iniciales.
 
 ```python
 class RegisterUserUseCase:
+    """Caso de uso para registrar un nuevo usuario en el sistema, creando su empresa y rol administrador."""
+
     def __init__(
-        self, uow: UnitOfWorkPort, hasher: PasswordHasherPort,
+        self,
+        uow: UnitOfWorkPort,
+        hasher: PasswordHasherPort,
         token_service: TokenServicePort,
     ) -> None:
         self.uow = uow
@@ -51,181 +89,72 @@ class RegisterUserUseCase:
         plain_password = PlainPassword(value=request.password)
 
         async with self.uow:
-            existing = await self.uow.users.get_by_email(email)
-            if existing:
+            # 1. Verificar si el email ya está registrado
+            existing_user = await self.uow.users.get_by_email(email)
+            if existing_user:
                 raise UserAlreadyExistsError(
-                    f"El correo '{request.email}' ya está registrado."
+                    f"El correo electrónico '{request.email}' ya está registrado."
                 )
 
+            # 2. Generar slug único para la empresa
+            slug = Slug.from_name(request.company_name)
+            existing_company = await self.uow.companies.get_by_slug(slug)
+            if existing_company:
+                raise CompanySlugExistsError(
+                    f"El slug '{slug.value}' generado para la empresa ya existe."
+                )
+
+            # 3. Crear empresa
+            company = Company.create(
+                nombre=request.company_name, slug=slug, email_contacto=request.email
+            )
+            await self.uow.companies.save(company)
+
+            # 4. Crear usuario vinculado a la nueva empresa
             hashed_val = self.hasher.hash(plain_password.value)
             hashed_password = HashedPassword(value=hashed_val)
-
-            user = User.register(email=email, hashed_password=hashed_password)
+            user = User.register(
+                email=email,
+                hashed_password=hashed_password,
+                empresa_id=company.id,
+                nombre=request.nombre,
+                telefono=request.telefono,
+            )
             await self.uow.users.save(user)
+
+            # 5. Crear rol Administrador por defecto con todos los permisos
+            admin_role = Role.create_admin(empresa_id=company.id)
+            await self.uow.roles.save(admin_role)
+
+            # 6. Asignar el rol al usuario creado
+            await self.uow.roles.assign_to_user(admin_role.id, user.id)
+
             await self.uow.commit()
 
-            access_token = await self.token_service.generate_access_token(
-                str(user.id)
-            )
-            refresh_token = await self.token_service.generate_refresh_token(
-                str(user.id)
-            )
-            return AuthTokensDTO(
-                access_token=access_token, refresh_token=refresh_token
-            )
+            # Generar tokens
+            access_token = await self.token_service.generate_access_token(str(user.id))
+            refresh_token = await self.token_service.generate_refresh_token(str(user.id))
+
+            return AuthTokensDTO(access_token=access_token, refresh_token=refresh_token)
 ```
 
-Flujo: valida con VOs → verifica duplicado → hashea → crea entidad →
-persiste → genera tokens.
+---
 
-## `LoginUserUseCase`
+## Casos de Uso del Módulo Auth
 
-```python
-class LoginUserUseCase:
-    def __init__(
-        self, uow: UnitOfWorkPort, hasher: PasswordHasherPort,
-        token_service: TokenServicePort,
-    ) -> None:
-        self.uow = uow
-        self.hasher = hasher
-        self.token_service = token_service
+- `LoginUserUseCase`: Valida las credenciales del usuario, registra el login en la entidad (emitiendo `UserLoggedIn`) y genera los tokens.
+- `RefreshTokenUseCase`: Decodifica el refresh token, lo revoca en Redis (blocklist con rotación), verifica que el usuario esté activo y emite un nuevo par de tokens.
+- `LogoutUserUseCase`: Revoca el token de acceso pasándolo a la blocklist de Redis.
+- `GetCurrentUserUseCase`: Obtiene los datos del usuario en sesión actual.
 
-    async def execute(self, request: LoginUserRequest) -> AuthTokensDTO:
-        email = Email(value=request.email)
+---
 
-        async with self.uow:
-            user = await self.uow.users.get_by_email(email)
-            if not user:
-                raise InvalidCredentialsError("Credenciales inválidas.")
+## Casos de Uso de Negocio (Multi-Tenant y RBAC)
 
-            if not self.hasher.verify(
-                request.password, user.hashed_password.value
-            ):
-                raise InvalidCredentialsError("Credenciales inválidas.")
-
-            user.login()
-            await self.uow.users.save(user)
-            await self.uow.commit()
-
-            access_token = await self.token_service.generate_access_token(
-                str(user.id)
-            )
-            refresh_token = await self.token_service.generate_refresh_token(
-                str(user.id)
-            )
-            return AuthTokensDTO(
-                access_token=access_token, refresh_token=refresh_token
-            )
-```
-
-Usa el mismo mensaje de error para email no encontrado y contraseña
-incorrecta. Esto evita filtrar qué usuarios existen.
-
-## `RefreshTokenUseCase`
-
-```python
-class RefreshTokenUseCase:
-    def __init__(
-        self, uow: UnitOfWorkPort, token_service: TokenServicePort,
-    ) -> None:
-        self.uow = uow
-        self.token_service = token_service
-
-    async def execute(self, request: RefreshTokenRequest) -> AuthTokensDTO:
-        claims = await self.token_service.decode_token(request.refresh_token)
-
-        if claims.get("type") != "refresh":
-            raise InvalidTokenError(
-                "El token no es un token de refresco válido."
-            )
-
-        jti = claims["jti"]
-        exp = claims["exp"]
-        sub = claims["sub"]
-
-        await self.token_service.revoke_token(jti=jti, exp=exp)
-
-        async with self.uow:
-            user = await self.uow.users.get_by_id(
-                UserId.from_string(sub)
-            )
-            if not user or not user.is_active:
-                raise UserInactiveError(
-                    "El usuario no existe o está inactivo."
-                )
-
-            access_token = await self.token_service.generate_access_token(
-                str(user.id)
-            )
-            refresh_token = await self.token_service.generate_refresh_token(
-                str(user.id)
-            )
-            return AuthTokensDTO(
-                access_token=access_token, refresh_token=refresh_token
-            )
-```
-
-Revoca el refresh token anterior **antes** de emitir el nuevo. Sin esta
-rotación, un token comprometido se podría reusar indefinidamente.
-
-## `LogoutUserUseCase`
-
-```python
-class LogoutUserUseCase:
-    def __init__(self, token_service: TokenServicePort) -> None:
-        self.token_service = token_service
-
-    async def execute(self, access_token: str) -> None:
-        claims = await self.token_service.decode_token(access_token)
-
-        if claims.get("type") != "access":
-            raise InvalidTokenError(
-                "Solo se pueden revocar tokens de acceso."
-            )
-
-        jti = claims["jti"]
-        exp = claims["exp"]
-        await self.token_service.revoke_token(jti=jti, exp=exp)
-```
-
-No necesita UoW porque solo opera sobre Redis (la blocklist). Decodifica el
-token y marca su JTI como revocado.
-
-## `GetCurrentUserUseCase`
-
-```python
-class GetCurrentUserUseCase:
-    def __init__(
-        self, uow: UnitOfWorkPort, token_service: TokenServicePort,
-    ) -> None:
-        self.uow = uow
-        self.token_service = token_service
-
-    async def execute(self, access_token: str) -> UserResponse:
-        claims = await self.token_service.decode_token(access_token)
-
-        if claims.get("type") != "access":
-            raise InvalidTokenError(
-                "Se requiere un token de acceso válido."
-            )
-
-        async with self.uow:
-            user = await self.uow.users.get_by_id(
-                UserId.from_string(claims["sub"])
-            )
-            if not user or not user.is_active:
-                raise UserInactiveError(
-                    "El usuario no existe o está inactivo."
-                )
-
-            return UserResponse(
-                id=str(user.id),
-                email=user.email.value,
-                is_active=user.is_active,
-                created_at=user.created_at,
-                updated_at=user.updated_at,
-            )
-```
+- **Company**: Permite a usuarios autorizados gestionar los datos del tenant.
+- **Role**: Permite la creación y actualización de roles con permisos granulares por módulo, y las acciones de asignación y revocación a usuarios específicos.
+- **Location**: Permite estructurar la distribución física de la empresa. La eliminación de ubicaciones valida que no existan ciclos jerárquicos.
+- **Asset**: Permite gestionar los activos físicos, filtrando los listados por empresa, ubicación y estado.
 
 ## Próximos pasos
 

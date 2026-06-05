@@ -7,11 +7,11 @@ Todos los errores de la API se devuelven en formato JSON:API. Los
 manejadores de excepciones se encargan de traducir cada tipo de error a
 la respuesta HTTP correspondiente.
 
-Archivo: `src/app/presentation/exception_handlers.py`
+Paquete: `src/app/presentation/exception_handlers/`
 
 ## Helper `jsonapi_response()`
 
-Todas las respuestas de error se construyen con esta función:
+Todas las respuestas de error se construyen con esta función genérica en `base.py`:
 
 ```python
 def jsonapi_response(
@@ -34,7 +34,7 @@ el documento de error excluyendo campos `null`.
 
 ### 1. `domain_exception_handler`
 
-Traduce excepciones del dominio a códigos HTTP:
+Traduce excepciones del dominio a códigos HTTP según la estructura del dict declarativo `_EXCEPTION_MAP` en `domain.py`:
 
 | Excepción | HTTP | Código interno |
 |---|---|---|
@@ -44,14 +44,24 @@ Traduce excepciones del dominio a códigos HTTP:
 | `InvalidCredentialsError` | 401 | `ERR_INVALID_CREDENTIALS` |
 | `UserInactiveError` | 403 | `ERR_USER_INACTIVE` |
 | `InvalidTokenError` | 401 | `ERR_INVALID_TOKEN` |
+| `CompanyNotFoundError` | 404 | `ERR_COMPANY_NOT_FOUND` |
+| `CompanySlugExistsError` | 409 | `ERR_COMPANY_SLUG_EXISTS` |
+| `RoleNotFoundError` | 404 | `ERR_ROLE_NOT_FOUND` |
+| `RoleNameExistsError` | 409 | `ERR_ROLE_NAME_EXISTS` |
+| `InsufficientPermissionsError` | 403 | `ERR_INSUFFICIENT_PERMISSIONS` |
+| `AssetNotFoundError` | 404 | `ERR_ASSET_NOT_FOUND` |
+| `AssetCodeExistsError` | 409 | `ERR_ASSET_CODE_EXISTS` |
+| `AssetSerialExistsError` | 409 | `ERR_ASSET_SERIAL_EXISTS` |
+| `LocationNotFoundError` | 404 | `ERR_LOCATION_NOT_FOUND` |
+| `LocationCircularReferenceError` | 422 | `ERR_LOCATION_CIRCULAR_REFERENCE` |
+| `LocationInvalidTypeHierarchyError` | 422 | `ERR_LOCATION_INVALID_TYPE_HIERARCHY` |
+| `ValidationException` | 422 | `ERR_VALIDATION` |
 
-Cada error incluye su `status`, `code`, `title` (nombre de la clase) y
-`detail` (mensaje original).
+Cada error incluye su `status`, `code`, `title` (nombre de la clase) y `detail` (mensaje original).
 
 ### 2. `request_validation_exception_handler`
 
-Traduce errores de validación de Pydantic (schemas de entrada) a 422 con
-JSON Pointer en `source.pointer`:
+Traduce errores de validación de Pydantic (schemas de entrada) a 422 con JSON Pointer en `source.pointer` para indicar qué atributo falló:
 
 ```json
 {
@@ -81,10 +91,11 @@ def register_exception_handlers(app: FastAPI) -> None:
 
 Se llama en `main.py` antes de registrar middlewares y routers.
 
-> [!TIP]
-> Si agregas una nueva excepción de dominio, solo necesitas añadir un
-> `elif` dentro de `domain_exception_handler()` con su código HTTP y
-> código interno. No necesitas crear un handler nuevo.
+<Callout type="info">
+
+Si agregas una nueva excepción de dominio, solo necesitas añadir una línea mapeándola en `_EXCEPTION_MAP` dentro de `presentation/exception_handlers/domain.py`.
+
+</Callout>
 
 ## Próximos pasos
 

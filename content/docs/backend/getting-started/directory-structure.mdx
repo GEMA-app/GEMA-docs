@@ -7,8 +7,11 @@ GEMA Backend organiza su código fuente siguiendo los principios de la arquitect
 
 Este diseño comparte los principios fundamentales de la [Clean Architecture](https://blog.cleancoder.com/uncle-bob/2012/08/13/the-clean-architecture.html), asegurando que los cambios en las herramientas tecnológicas no afecten las reglas de negocio de tu sistema.
 
-> [!NOTE]
-> **¿Qué es la arquitectura hexagonal?** Aísla la lógica de negocio de los detalles técnicos. La capa del dominio (`domain`) no importa nada de la infraestructura (`infrastructure`); únicamente define contratos que la infraestructura implementa. Esto te permite cambiar de base de datos, de framework HTTP o de proveedor de autenticación sin modificar la lógica de negocio.
+<Callout type="info">
+
+**¿Qué es la arquitectura hexagonal?** Aísla la lógica de negocio de los detalles técnicos. La capa del dominio (`domain`) no importa nada de la infraestructura (`infrastructure`); únicamente define contratos que la infraestructura implementa. Esto te permite cambiar de base de datos, de framework HTTP o de proveedor de autenticación sin modificar la lógica de negocio.
+
+</Callout>
 
 ## Árbol de directorios
 
@@ -19,23 +22,22 @@ unegia-sigma-backend/
 ├── src/
 │   └── app/
 │       ├── domain/                   # Núcleo de negocio, sin dependencias externas
-│       │   ├── entities.py           # Entidades con comportamiento y reglas de negocio
-│       │   ├── value_objects.py      # Objetos de valor inmutables (Email, UserId...)
-│       │   ├── exceptions.py         # Jerarquía de excepciones del dominio
+│       │   ├── entities/             # Entidades con comportamiento y reglas (User, Company, Role...)
+│       │   ├── value_objects/        # Objetos de valor inmutables (Email, Slug, Identifiers...)
+│       │   ├── exceptions/           # Excepciones personalizadas por módulos
 │       │   └── events.py             # Eventos de dominio inmutables
 │       │
 │       ├── application/              # Casos de uso y contratos (puertos)
 │       │   ├── ports/
-│       │   │   ├── repository.py     # UserRepositoryPort (Protocol)
+│       │   │   ├── repository.py     # UserRepositoryPort
+│       │   │   ├── company_repository.py
+│       │   │   ├── role_repository.py
+│       │   │   ├── asset_repository.py
+│       │   │   ├── location_repository.py
 │       │   │   ├── auth.py           # PasswordHasherPort, TokenServicePort
-│       │   │   └── unit_of_work.py   # UnitOfWorkPort (async context manager)
-│       │   ├── use_cases/
-│       │   │   ├── register_user.py
-│       │   │   ├── login_user.py
-│       │   │   ├── refresh_token.py
-│       │   │   ├── logout_user.py
-│       │   │   └── get_current_user.py
-│       │   └── dtos.py               # DTOs de entrada y salida (dataclasses puros)
+│       │   │   └── unit_of_work.py   # UnitOfWorkPort
+│       │   ├── use_cases/            # Casos de uso estructurados por módulo (auth, company, role...)
+│       │   └── dtos/                 # DTOs de entrada y salida (auth_dtos, company_dtos...)
 │       │
 │       ├── infrastructure/           # Adaptadores: base de datos, seguridad, caché
 │       │   ├── config/
@@ -44,9 +46,8 @@ unegia-sigma-backend/
 │       │   ├── db/
 │       │   │   ├── base.py           # DeclarativeBase compartida para evitar ciclos
 │       │   │   ├── session.py        # AsyncEngine y async_sessionmaker
-│       │   │   └── models.py         # Modelos ORM de SQLAlchemy 2.0
-│       │   ├── repositories/
-│       │   │   └── user_repository.py  # SqlAlchemyUserRepository
+│       │   │   └── models/           # Modelos ORM (user, company, role, location, asset...)
+│       │   ├── repositories/         # Implementaciones de repositorios (user, company, role...)
 │       │   ├── cache/
 │       │   │   └── redis.py          # Cliente global asíncrono de Redis
 │       │   ├── security/
@@ -57,14 +58,10 @@ unegia-sigma-backend/
 │       ├── presentation/             # Capa de entrada: FastAPI, schemas, middlewares
 │       │   ├── api/
 │       │   │   └── v1/
-│       │   │       ├── endpoints/
-│       │   │       │   ├── auth.py   # POST /register, /login, /refresh, /logout, GET /me
-│       │   │       │   └── health.py # GET /health/live, /health/ready
-│       │   │       ├── schemas/
-│       │   │       │   ├── jsonapi_base.py  # ResourceIdentifier, ErrorObject...
-│       │   │       │   └── auth.py          # TokenDocument, UserDocument, Requests...
+│       │   │       ├── endpoints/    # Routers (auth, companies, roles, locations, assets)
+│       │   │       ├── schemas/      # Schemas JSON:API (auth, company, role, location, asset)
 │       │   │       └── router.py     # v1_router con prefijo /v1
-│       │   ├── exception_handlers.py # Mapeo excepción → HTTP + JSON:API
+│       │   ├── exception_handlers/   # Mapeo excepción → HTTP + JSON:API por archivos
 │       │   └── middlewares/
 │       │       ├── request_id.py     # Inyecta X-Request-ID en cada solicitud
 │       │       ├── content_type.py   # Valida Content-Type: application/vnd.api+json
@@ -109,25 +106,25 @@ La carpeta `src/app` es el núcleo de tu aplicación. Todo el código fuente del
 
 La capa de dominio representa el corazón de la lógica de negocio. No contiene dependencias de librerías de infraestructura (como SQLAlchemy o Redis) ni frameworks (como FastAPI). Aquí se definen las reglas que rigen el negocio:
 
-- **`entities.py`**: Contiene las entidades del dominio con su propio comportamiento y lógica de validación interna.
-- **`value_objects.py`**: Alberga objetos inmutables que representan conceptos del negocio mediante valores (como un identificador de usuario o un correo electrónico).
-- **`exceptions.py`**: Define la jerarquía de excepciones propias del negocio.
+- **`entities/`**: Paquete que contiene las entidades del dominio con su propio comportamiento y lógica (User, Company, Role, Location, Asset...).
+- **`value_objects/`**: Paquete que alberga objetos inmutables que representan conceptos del negocio mediante valores (Email, Slug, identifiers...).
+- **`exceptions/`**: Paquete que define la jerarquía de excepciones propias del negocio.
 - **`events.py`**: Contiene los eventos inmutables que se disparan cuando ocurren cambios significativos en el dominio.
 
 ### Capa de aplicación (application)
 
 La capa de aplicación implementa los casos de uso específicos del sistema. Coordina el flujo de datos desde y hacia el dominio, sin conocer los detalles de la infraestructura. Esta capa define la interfaz a través de puertos:
 
-- **`ports/`**: Aquí se definen los puertos (interfaces estructuradas mediante `Protocol` en Python) que la infraestructura debe implementar. Ejemplos de esto son `UserRepositoryPort` o `UnitOfWorkPort`.
-- **`use_cases/`**: Contiene los casos de uso individuales de la aplicación (como el registro de usuarios, inicio de sesión o refresco de tokens).
-- **`dtos.py`**: Define los objetos de transferencia de datos (`dataclasses` puros) para la entrada y salida de datos en la capa de aplicación.
+- **`ports/`**: Aquí se definen los puertos (interfaces estructuradas mediante `Protocol` en Python) que la infraestructura debe implementar (ej. `UserRepositoryPort`, `UnitOfWorkPort`, etc.).
+- **`use_cases/`**: Contiene los casos de uso organizados en carpetas por módulos del negocio.
+- **`dtos/`**: Define los DTOs de entrada y salida (`dataclasses` puros) para la capa de aplicación, organizados por archivos.
 
 ### Capa de infraestructura (infrastructure)
 
 La capa de infraestructura contiene los adaptadores que conectan la aplicación con servicios externos, bases de datos o herramientas de seguridad. Implementa los puertos definidos en la capa de aplicación:
 
 - **`config/`**: Contiene las clases de configuración (Pydantic Settings) y la inicialización del sistema de logs estructurados.
-- **`db/`**: Define la sesión asíncrona de base de datos y los modelos ORM de SQLAlchemy.
+- **`db/`**: Define la sesión asíncrona de base de datos y los modelos ORM de SQLAlchemy estructurados como paquete de modelos.
 - **`repositories/`**: Implementa los repositorios (adaptadores de base de datos) que heredan de los puertos correspondientes de la capa de aplicación.
 - **`cache/`**: Alberga el cliente asíncrono para interactuar con Redis.
 - **`security/`**: Contiene las implementaciones de los servicios de generación de tokens JWT y hashing de contraseñas.
@@ -138,7 +135,7 @@ La capa de infraestructura contiene los adaptadores que conectan la aplicación 
 La capa de presentación es el punto de entrada para las peticiones externas. Traduce las llamadas HTTP en datos comprensibles para la aplicación:
 
 - **`api/`**: Contiene las rutas, endpoints y esquemas (bajo el estándar JSON:API) organizados por versiones.
-- **`exception_handlers.py`**: Mapea las excepciones de la aplicación y del dominio a respuestas HTTP estandarizadas.
+- **`exception_handlers/`**: Mapea las excepciones de la aplicación y del dominio a respuestas HTTP estandarizadas en archivos segregados.
 - **`middlewares/`**: Incluye los filtros de peticiones HTTP, tales como la validación de cabeceras, limitación de tasa de solicitudes (rate limiting) y asignación de identificadores de petición.
 
 ### Raíz de composición (composition)
@@ -196,11 +193,17 @@ graph TD
 
 La infraestructura implementa los contratos definidos en `application/ports/` y nunca al revés. Si un módulo del dominio requiere importar algo de la infraestructura, indica que está en una ubicación incorrecta.
 
-> [!NOTE]
-> **¿Qué es un `Protocol` en Python?** Es una interfaz estructural: define los métodos que un objeto debe tener sin forzar la herencia. En este proyecto, los puertos de la aplicación (`UserRepositoryPort`, `TokenServicePort`) son `Protocol`. La infraestructura los implementa sin importarlos directamente, manteniendo el dominio aislado.
+<Callout type="info">
 
-> [!NOTE]
-> **El patrón Unit of Work (unidad de trabajo):** Coordina y agrupa múltiples operaciones de base de datos en una única transacción atómica. Si alguna de las operaciones falla, se realiza un rollback automático de toda la transacción; si todas tienen éxito, se confirman los cambios de forma conjunta. Esto garantiza la integridad de la base de datos. Puedes consultar la definición detallada en el catálogo de [Martin Fowler](https://martinfowler.com/eaaCatalog/unitOfWork.html).
+**¿Qué es un `Protocol` en Python?** Es una interfaz estructural: define los métodos que un objeto debe tener sin forzar la herencia. En este proyecto, los puertos de la aplicación (`UserRepositoryPort`, `TokenServicePort`) son `Protocol`. La infraestructura los implementa sin importarlos directamente, manteniendo el dominio aislado.
+
+</Callout>
+
+<Callout type="info">
+
+**El patrón Unit of Work (unidad de trabajo):** Coordina y agrupa múltiples operaciones de base de datos en una única transacción atómica. Si alguna de las operaciones falla, se realiza un rollback automático de toda la transacción; si todas tienen éxito, se confirman los cambios de forma conjunta. Esto garantiza la integridad de la base de datos. Puedes consultar la definición detallada en el catálogo de [Martin Fowler](https://martinfowler.com/eaaCatalog/unitOfWork.html).
+
+</Callout>
 
 ## Próximos pasos
 

@@ -7,79 +7,91 @@ Los modelos ORM son las clases que representan tablas de la base de datos.
 Heredan de `Base` (declarada en `db/base.py`) y usan `Mapped` + `mapped_column`
 de SQLAlchemy 2.0.
 
-## `UserModel`
+Todos los modelos viven en el paquete `src/app/infrastructure/db/models/`.
 
-Archivo: `src/app/infrastructure/db/models.py`
+## Mixins Reutilizables
+
+Para evitar la duplicación de código en un sistema multi-tenant, se implementan mixins en `src/app/infrastructure/db/models/mixins.py`:
 
 ```python
-from datetime import datetime, timezone
-import uuid
-from sqlalchemy import DateTime
-from sqlalchemy.orm import Mapped, mapped_column
-from app.infrastructure.db.base import Base
-
-
-class UserModel(Base):
-    """Modelo ORM para la tabla de usuarios."""
-
-    __tablename__ = "users"
-
-    id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
-    email: Mapped[str] = mapped_column(
-        unique=True, index=True, nullable=False
+class TenantMixin:
+    """Mixin que agrega empresa_id con FK e índice a cualquier modelo multi-tenant."""
+    empresa_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("empresas.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    hashed_password: Mapped[str] = mapped_column(nullable=False)
-    is_active: Mapped[bool] = mapped_column(default=True, nullable=False)
+
+class TimestampMixin:
+    """Mixin que agrega created_at y updated_at con timezone awareness."""
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        default=lambda: datetime.now(timezone.utc),
-        nullable=False,
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
-        default=lambda: datetime.now(timezone.utc),
-        onupdate=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
         nullable=False,
     )
 ```
 
-### Columnas
+---
 
-| Columna | Tipo | Restricciones |
-|---|---|---|
-| `id` | `uuid.UUID` | Primary key |
-| `email` | `str` | `unique=True`, `index=True`, `nullable=False` |
-| `hashed_password` | `str` | `nullable=False` |
-| `is_active` | `bool` | `default=True`, `nullable=False` |
-| `created_at` | `datetime` | `DateTime(timezone=True)`, default al momento de creación |
-| `updated_at` | `datetime` | `DateTime(timezone=True)`, default + `onupdate` al momento de modificación |
+## Tabla de Modelos ORM
 
-> [!TIP]
-> `onupdate=lambda: datetime.now(timezone.utc)` en `updated_at` hace que
-> SQLAlchemy actualice automáticamente la columna cada vez que se modifica
-> el registro. No necesitas asignarlo manualmente.
+| Modelo | Clase | Tabla | Mixins | Descripción |
+|---|---|---|---|---|
+| **User** | `UserModel` | `usuarios` | `TimestampMixin` | Vincula credenciales, nombre y roles a una empresa. |
+| **Company** | `CompanyModel` | `empresas` | `TimestampMixin` | El tenant principal de la plataforma. |
+| **SubscriptionPlan** | `SubscriptionPlanModel` | `planes_suscripcion` | Ninguno | Modelo estático de planes para multi-tenancy. |
+| **Role** | `RoleModel` | `roles` | `TenantMixin`, `TimestampMixin` | Tabla de roles creados por la empresa. |
+| **Permission** | `PermissionModel` | `permisos` | `TimestampMixin` | Permisos CRUD asociados a un rol específico. |
+| **RoleUser** | `RoleUserModel` | `roles_usuarios` | Ninguno | Tabla intermedia asociativa de usuarios y roles. |
+| **Location** | `LocationModel` | `ubicaciones` | `TenantMixin`, `TimestampMixin` | Jerarquía física auto-referenciada por `parent_id`. |
+| **Asset** | `AssetModel` | `activos` | `TenantMixin`, `TimestampMixin` | Activos de la empresa con serial, código y estado. |
+| **CatalogArticle** | `CatalogArticleModel` | `articulos_catalogo` | `TenantMixin`, `TimestampMixin` | Placeholder de catálogo para FK de activos. |
+| **ArticleCategory** | `ArticleCategoryModel` | `categorias_articulos` | `TenantMixin`, `TimestampMixin` | Placeholder de categoría para artículos. |
+
+---
+
+## Ejemplo: `AssetModel`
+
+Definido en `src/app/infrastructure/db/models/asset.py`:
+
+```python
+class AssetModel(Base, TenantMixin, TimestampMixin):
+    """Modelo ORM para la tabla de activos físicos."""
+
+    __tablename__ = "activos"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    articulo_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("articulos_catalogo.id"), nullable=False)
+    ubicacion_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("ubicaciones.id", ondelete="SET NULL"), nullable=True)
+    serial_interno: Mapped[str] = mapped_column(nullable=False)
+    codigo_activo: Mapped[str] = mapped_column(nullable=False)
+    estado: Mapped[str] = mapped_column(nullable=False)
+    fecha_adquisicion: Mapped[date] = mapped_column(nullable=True)
+    valor_monetario: Mapped[float] = mapped_column(nullable=True)
+    moneda: Mapped[str] = mapped_column(default="USD", nullable=False)
+
+    # Relaciones
+    ubicacion = relationship("LocationModel", back_populates="activos")
+```
 
 ### ¿Por qué no se usa el modelo como entidad?
 
-El modelo ORM (`UserModel`) es solo para la base de datos. La entidad de
-dominio (`User`) es la que tiene comportamiento y reglas de negocio. La
-traducción entre ambas la hace el repositorio (ver [Repositorios](./repositories)).
+El modelo ORM (`AssetModel`) es solo para la persistencia. La entidad de dominio (`Asset`) es pura y no tiene acoplamiento con SQLAlchemy. La traducción de modelo a entidad (y viceversa) se realiza mediante los repositorios (ver [Repositorios](./repositories)).
 
 ```
-UserModel (SQLAlchemy)  →  UserRepositoryPort  →  User (entidad dominio)
-   ↑                            ↓
-Tabla "users"         SqlAlchemyUserRepository
+AssetModel (SQLAlchemy)  →  AssetRepositoryPort  →  Asset (entidad dominio)
+         ↑                            ↓
+   Tabla "activos"         SqlAlchemyAssetRepository
 ```
 
-## Convenciones
+## Convenciones del Proyecto
 
-- El nombre de la tabla en plural (`users`).
-- La primary key siempre es `id` de tipo `uuid.UUID`.
-- Las columnas de fecha usan `DateTime(timezone=True)` y siempre en UTC.
-- Los índices se declaran con `index=True` en la columna, no como
-  `Index()` separado a menos que sean compuestos.
+- Los nombres de tablas son en plural y en español (ej. `usuarios`, `empresas`, `activos`).
+- Todas las PKs y FKs usan UUIDs para consistencia del sistema.
+- El aislamiento de datos se garantiza en todas las consultas utilizando el filtro `empresa_id` (proveniente del `TenantMixin`).
 
 ## Próximos pasos
 
-Los [Repositorios](./repositories) usan `UserModel` para traducir entre la
-base de datos y las entidades de dominio.
+Los [Repositorios](./repositories) usan estos modelos para traducir entre la base de datos y las entidades de dominio.

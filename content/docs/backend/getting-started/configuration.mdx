@@ -5,8 +5,11 @@ description: Variables de entorno, logging y validación con Pydantic Settings
 
 Toda la configuración de la aplicación se lee desde variables de entorno mediante **Pydantic Settings** ([documentación oficial](https://docs.pydantic.dev/latest/concepts/settings/)). El módulo `src/app/infrastructure/config/settings.py` lee los valores, los valida al iniciar y detiene la aplicación si detecta algún error de configuración.
 
-> [!NOTE]
-> **¿Qué hace Pydantic Settings?** Lee las variables de entorno (o un archivo `.env`), las convierte al tipo de dato de Python correspondiente (`int`, `bool`, `str`) y valida que todas las variables obligatorias estén presentes. Si falta alguna o tiene un formato incorrecto, genera un error detallado antes de que la aplicación intente arrancar.
+<Callout type="info">
+
+**¿Qué hace Pydantic Settings?** Lee las variables de entorno (o un archivo `.env`), las convierte al tipo de dato de Python correspondiente (`int`, `bool`, `str`) y valida que todas las variables obligatorias estén presentes. Si falta alguna o tiene un formato incorrecto, genera un error detallado antes de que la aplicación intente arrancar.
+
+</Callout>
 
 ## Filosofía Twelve-Factor (patrón de configuración)
 
@@ -80,8 +83,11 @@ Estas variables configuran la firma, expiración y seguridad de los tokens de ac
 | `JWT_ACCESS_TOKEN_EXPIRE_MINUTES` | Tiempo de vida del token de acceso en minutos | `30` |
 | `JWT_REFRESH_TOKEN_EXPIRE_DAYS` | Tiempo de vida del token de refresco en días | `7` |
 
-> [!WARNING]
-> En `APP_ENV=production`, la aplicación no arranca si `JWT_SECRET_KEY` coincide con el valor por defecto de desarrollo o tiene menos de 32 caracteres. Este validador de seguridad está definido en `settings.py` mediante `@field_validator`.
+<Callout type="warn">
+
+En `APP_ENV=production`, la aplicación no arranca si `JWT_SECRET_KEY` coincide con el valor por defecto de desarrollo o tiene menos de 32 caracteres. Este validador de seguridad está definido en `settings.py` mediante `@field_validator`.
+
+</Callout>
 
 ### Redis
 
@@ -91,8 +97,11 @@ Redis actúa como lista de bloqueo de tokens revocados (JTI blocklist). Cada ent
 |----------|-------------|-------------|
 | `REDIS_URL` | URL de conexión al servidor de Redis | `redis://redis:6379/0` |
 
-> [!NOTE]
-> **¿Qué es un JTI?** JTI significa *JWT ID (JSON Web Token Identifier)*. Es un identificador único que lleva cada token y que se guarda en Redis al cerrar sesión. Mientras el JTI esté en la lista, el token se considera inválido aunque su fecha de expiración todavía no haya llegado. Cuando el token vence, el registro expira automáticamente en Redis.
+<Callout type="info">
+
+**¿Qué es un JTI?** JTI significa *JWT ID (JSON Web Token Identifier)*. Es un identificador único que lleva cada token y que se guarda en Redis al cerrar sesión. Mientras el JTI esté en la lista, el token se considera inválido aunque su fecha de expiración todavía no haya llegado. Cuando el token vence, el registro expira automáticamente en Redis.
+
+</Callout>
 
 ### Aplicación
 
@@ -106,15 +115,21 @@ Controla aspectos globales del servidor FastAPI, los modos de depuración y el c
 | `APP_VERSION` | Versión actual de la API | `0.1.0` |
 | `STRICT_JSONAPI` | Exige `Content-Type: application/vnd.api+json` en todas las solicitudes | `true` |
 
-> [!NOTE]
-> **¿Qué es JSON:API?** Es un estándar que define cómo estructurar respuestas y peticiones en una API REST: tipos de recurso, identificadores, relaciones y manejo de errores, todo con un formato consistente. Puedes leer la [especificación completa en jsonapi.org](https://jsonapi.org/).
+<Callout type="info">
+
+**¿Qué es JSON:API?** Es un estándar que define cómo estructurar respuestas y peticiones en una API REST: tipos de recurso, identificadores, relaciones y manejo de errores, todo con un formato consistente. Puedes leer la [especificación completa en jsonapi.org](https://jsonapi.org/).
+
+</Callout>
 
 ## Modo de depuración
 
 La variable `APP_DEBUG` controla si la aplicación muestra registros detallados de SQL en la consola.
 
-> [!WARNING]
-> `APP_DEBUG=true` activa logs detallados de SQL que pueden exponer datos sensibles si se filtran. En producción este valor debe ser siempre `false`.
+<Callout type="warn">
+
+`APP_DEBUG=true` activa logs detallados de SQL que pueden exponer datos sensibles si se filtran. En producción este valor debe ser siempre `false`.
+
+</Callout>
 
 ## Tipos de variables de entorno
 
@@ -170,8 +185,11 @@ El módulo `src/app/infrastructure/config/logger.py` configura [Structlog](https
 
 Ambas configuraciones capturan los registros de Uvicorn, SQLAlchemy y Alembic bajo el mismo sistema, por lo que no necesitas configurar nada adicional para verlos.
 
-> [!NOTE]
-> **¿Qué es el logging estructurado?** En lugar de emitir líneas de texto libre como `"Usuario creado: juan@sigma.com"`, Structlog emite objetos con campos clave-valor: `{"event": "user_created", "email": "juan@sigma.com", "level": "info"}`. Así los sistemas de monitoreo pueden filtrar, agrupar y alertar sobre campos concretos sin necesidad de parsear texto.
+<Callout type="info">
+
+**¿Qué es el logging estructurado?** En lugar de emitir líneas de texto libre como `"Usuario creado: juan@sigma.com"`, Structlog emite objetos con campos clave-valor: `{"event": "user_created", "email": "juan@sigma.com", "level": "info"}`. Así los sistemas de monitoreo pueden filtrar, agrupar y alertar sobre campos concretos sin necesidad de parsear texto.
+
+</Callout>
 
 ## Solución de problemas comunes
 

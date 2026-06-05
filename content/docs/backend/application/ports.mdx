@@ -10,11 +10,14 @@ mediante adaptadores.
 Todos viven en `src/app/application/ports/` y se definen como `Protocol` de
 Python.
 
-> [!NOTE]
-> Usamos `typing.Protocol` en lugar de clases base abstractas (ABC) porque
-> Protocol usa **duck typing**: cualquier clase que tenga los métodos
-> declarados es compatible automáticamente, sin necesidad de herencia
-> explícita. Esto desacopla aún más la aplicación de la infraestructura.
+<Callout type="info">
+
+Usamos `typing.Protocol` en lugar de clases base abstractas (ABC) porque
+Protocol usa **duck typing**: cualquier clase que tenga los métodos
+declarados es compatible automáticamente, sin necesidad de herencia
+explícita. Esto desacopla aún más la aplicación de la infraestructura.
+
+</Callout>
 
 ## `UserRepositoryPort`
 
@@ -42,9 +45,12 @@ class UserRepositoryPort(Protocol):
 | `get_by_email` | `Email` | `Optional[User]` |
 | `get_by_id` | `UserId` | `Optional[User]` |
 
-> [!WARNING]
-> `save()` persiste en la sesión pero **no hace commit**. El commit lo hace
-> exclusivamente el Unit of Work.
+<Callout type="warn">
+
+`save()` persiste en la sesión pero **no hace commit**. El commit lo hace
+exclusivamente el Unit of Work.
+
+</Callout>
 
 ## `PasswordHasherPort`
 
@@ -95,14 +101,72 @@ class TokenServicePort(Protocol):
 El `subject` siempre es un string (`UserId.__str__()`). Nunca un `uuid.UUID`
 directo.
 
+## `CompanyRepositoryPort`
+
+Archivo: `src/app/application/ports/company_repository.py`
+
+```python
+class CompanyRepositoryPort(Protocol):
+    async def save(self, company: Company) -> None: ...
+    async def get_by_id(self, id: CompanyId) -> Company | None: ...
+    async def get_by_slug(self, slug: Slug) -> Company | None: ...
+    async def list_all(self, offset: int, limit: int) -> tuple[list[Company], int]: ...
+    async def delete(self, id: CompanyId) -> None: ...
+```
+
+## `RoleRepositoryPort`
+
+Archivo: `src/app/application/ports/role_repository.py`
+
+```python
+class RoleRepositoryPort(Protocol):
+    async def save(self, role: Role) -> None: ...
+    async def get_by_id(self, id: RoleId, empresa_id: CompanyId) -> Role | None: ...
+    async def list_by_company(self, empresa_id: CompanyId) -> list[Role]: ...
+    async def delete(self, id: RoleId, empresa_id: CompanyId) -> None: ...
+    async def assign_to_user(self, role_id: RoleId, user_id: UserId) -> None: ...
+    async def revoke_from_user(self, role_id: RoleId, user_id: UserId) -> None: ...
+    async def get_user_roles(self, user_id: UserId, empresa_id: CompanyId) -> list[Role]: ...
+```
+
+## `AssetRepositoryPort`
+
+Archivo: `src/app/application/ports/asset_repository.py`
+
+```python
+class AssetRepositoryPort(Protocol):
+    async def save(self, asset: Asset) -> None: ...
+    async def get_by_id(self, id: AssetId, empresa_id: CompanyId) -> Asset | None: ...
+    async def list_by_company(
+        self, empresa_id: CompanyId, offset: int, limit: int, filters: dict[str, Any] | None = None
+    ) -> tuple[list[Asset], int]: ...
+    async def delete(self, id: AssetId, empresa_id: CompanyId) -> None: ...
+```
+
+## `LocationRepositoryPort`
+
+Archivo: `src/app/application/ports/location_repository.py`
+
+```python
+class LocationRepositoryPort(Protocol):
+    async def save(self, location: Location) -> None: ...
+    async def get_by_id(self, id: LocationId, empresa_id: CompanyId) -> Location | None: ...
+    async def get_tree(self, empresa_id: CompanyId) -> list[Location]: ...
+    async def get_children(self, parent_id: LocationId, empresa_id: CompanyId) -> list[Location]: ...
+    async def delete(self, id: LocationId, empresa_id: CompanyId) -> None: ...
+```
+
 ## `UnitOfWorkPort`
 
 Archivo: `src/app/application/ports/unit_of_work.py`
 
 ```python
 class UnitOfWorkPort(Protocol):
-
     users: UserRepositoryPort
+    companies: CompanyRepositoryPort
+    roles: RoleRepositoryPort
+    assets: AssetRepositoryPort
+    locations: LocationRepositoryPort
 
     async def __aenter__(self) -> Self:
         ...
@@ -117,12 +181,13 @@ class UnitOfWorkPort(Protocol):
         ...
 ```
 
-El UoW expone `users` como atributo. Esto permite a los casos de uso
-acceder al repositorio dentro de una transacción:
+El UoW expone todos los repositorios como atributos. Esto permite a los casos de uso
+acceder a múltiples repositorios dentro de la misma transacción:
 
 ```python
 async with self.uow:
-    await self.uow.users.save(user)
+    company = Company.create(nombre="Test", slug=Slug("test"))
+    await self.uow.companies.save(company)
     await self.uow.commit()
 ```
 
@@ -135,13 +200,17 @@ funciona.
 Casos de uso
   → dependen de UnitOfWorkPort
     → UnitOfWorkPort.users es UserRepositoryPort
+    → UnitOfWorkPort.companies es CompanyRepositoryPort
+    → UnitOfWorkPort.roles es RoleRepositoryPort
+    → UnitOfWorkPort.assets es AssetRepositoryPort
+    → UnitOfWorkPort.locations es LocationRepositoryPort
   → dependen de PasswordHasherPort
   → dependen de TokenServicePort
 ```
 
 Los casos de uso nunca dependen de implementaciones concretas. Solo conocen
 estos Protocol. La infraestructura (`SqlAlchemyUserRepository`,
-`BcryptPasswordHasher`, `PyJwtTokenService`, `SqlAlchemyUnitOfWork`)
+`BcryptPasswordHasher`, `PyJwtTokenService`, `SqlAlchemyUnitOfWork`, etc.)
 implementa los Protocol sin que la aplicación lo sepa.
 
 ## Próximos pasos

@@ -22,8 +22,9 @@ Antes de empezar, instala estas herramientas en tu máquina:
 - **Poetry 1.8+** ([instalar](https://python-poetry.org/docs/#installation)). Gestor de dependencias y empaquetado estándar del proyecto.
 - **Git** ([descargar](https://git-scm.com/downloads)). Sistema de control de versiones para clonar y gestionar el repositorio.
 
-> [!NOTE]
-> **¿Compose V2 vs Compose V1?** El Compose original era un binario independiente (`docker-compose`). Desde Docker 23, Compose es un plugin oficial del cliente de Docker y se invoca con `docker compose` (sin guion). La diferencia no es estética: V2 soporta perfiles, verificaciones de salud con condiciones (`service_healthy`) y sintaxis YAML que V1 ignora. Si la terminal devuelve `v2.x`, el entorno es compatible.
+<Callout type="info" title="¿Compose V2 vs Compose V1?">
+El Compose original era un binario independiente (`docker-compose`). Desde Docker 23, Compose es un plugin oficial del cliente de Docker y se invoca con `docker compose` (sin guion). La diferencia no es estética: V2 soporta perfiles, verificaciones de salud con condiciones (`service_healthy`) y sintaxis YAML que V1 ignora. Si la terminal devuelve `v2.x`, el entorno es compatible.
+</Callout>
 
 ## Secuencia de instalación
 
@@ -100,8 +101,9 @@ docker compose build
 
 Docker construye la imagen de la aplicación en dos etapas: una base compartida y una capa de desarrollo con las dependencias de pruebas y análisis estático. La imagen de producción queda disponible bajo el target `production` del mismo `Dockerfile`.
 
-> [!IMPORTANT]
-> Crea el archivo `alembic.ini` en tu máquina antes de montarlo como volumen. Si Docker no lo encuentra, creará un directorio en su lugar con ese nombre y causará un fallo en la configuración de Alembic.
+<Callout type="warn" title="Importante">
+Crea el archivo `alembic.ini` en tu máquina antes de montarlo como volumen. Si Docker no lo encuentra, creará un directorio en su lugar con ese nombre y causará un fallo en la configuración de Alembic.
+</Callout>
 
 ### 5. Levanta los servicios
 
@@ -152,13 +154,14 @@ Invoke-RestMethod http://localhost:8000/health/ready
 
 El endpoint `/health/live` confirma que la aplicación está en ejecución. El endpoint `/health/ready` comprueba además la conexión con PostgreSQL y Redis. Si la respuesta es `"ready"`, el entorno está operativo.
 
-> [!TIP]
-> **Lista de verificación rápida:**
->
-> - [ ] `docker compose ps` muestra los tres servicios con estado `Up`.
-> - [ ] El endpoint `/health/live` devuelve `{"status": "ok"}`.
-> - [ ] El endpoint `/health/ready` devuelve `{"status": "ready"}`.
-> - [ ] Las tablas existen en la base de datos: `docker compose exec db psql -U sigma -d sigma -c "\dt"`.
+<Callout type="info" title="Lista de verificación rápida">
+
+- [ ] `docker compose ps` muestra los tres servicios con estado `Up`.
+- [ ] El endpoint `/health/live` devuelve `{"status": "ok"}`.
+- [ ] El endpoint `/health/ready` devuelve `{"status": "ready"}`.
+- [ ] Las tablas existen en la base de datos: `docker compose exec db psql -U sigma -d sigma -c "\dt"`.
+
+</Callout>
 
 ## Instalación alternativa (sin Docker)
 
@@ -205,8 +208,9 @@ Puedes ejecutar la aplicación sin Docker si cuentas con los servicios instalado
    uvicorn app.main:app --reload --port 8000
    ```
 
-> [!WARNING]
-> Esta modalidad de ejecución no cuenta con el mismo nivel de pruebas que el entorno de Docker. Si encuentras inconvenientes durante la configuración, te recomendamos utilizar el entorno con Docker.
+<Callout type="warn">
+Esta modalidad de ejecución no cuenta con el mismo nivel de pruebas que el entorno de Docker. Si encuentras inconvenientes durante la configuración, te recomendamos utilizar el entorno con Docker.
+</Callout>
 
 </details>
 

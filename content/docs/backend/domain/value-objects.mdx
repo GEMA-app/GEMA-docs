@@ -7,8 +7,7 @@ Los value objects encapsulan datos con su propia validación. Son inmutables,
 no tienen identidad propia y dos instancias con el mismo valor se consideran
 iguales.
 
-Los cuatro value objects del proyecto viven en
-`src/app/domain/value_objects.py`.
+Todos los value objects viven en el paquete `src/app/domain/value_objects/`.
 
 ## Tabla comparativa
 
@@ -18,6 +17,11 @@ Los cuatro value objects del proyecto viven en
 | `PlainPassword` | 8+ chars, mayúscula, número, especial | Antes de hashear |
 | `HashedPassword` | No vacío | `User.hashed_password` |
 | `UserId` | UUID válido | `User.id`, JWT subject |
+| `CompanyId` | UUID válido | `Company.id`, `User.empresa_id` |
+| `RoleId` | UUID válido | `Role.id` |
+| `AssetId` | UUID válido | `Asset.id` |
+| `LocationId` | UUID válido | `Location.id` |
+| `Slug` | regex `^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$` | `Company.slug` |
 
 ## `Email`
 
@@ -68,10 +72,13 @@ class PlainPassword:
 Valida la fortaleza de la contraseña **antes** de que llegue al hasher. Si
 no cumple todas las reglas, lanza `WeakPasswordError`.
 
-> [!NOTE]
-> `PlainPassword` solo existe en el momento de registro o login. Nunca se
-> persiste. Una vez que pasa la validación, se hashea con bcrypt y el
-> resultado se guarda como `HashedPassword`.
+<Callout type="info">
+
+`PlainPassword` solo existe en el momento de registro o login. Nunca se
+persiste. Una vez que pasa la validación, se hashea con bcrypt y el
+resultado se guarda como `HashedPassword`.
+
+</Callout>
 
 ## `HashedPassword`
 
@@ -88,7 +95,9 @@ class HashedPassword:
 Solo verifica que el hash no esté vacío. El hash ya fue generado por bcrypt
 antes de crear este value object.
 
-## `UserId`
+## `UserId`, `CompanyId`, `RoleId`, `AssetId` y `LocationId`
+
+Todos los Value Objects de identificadores heredan el comportamiento de UUID. Viven en `src/app/domain/value_objects/identifiers.py`:
 
 ```python
 @dataclass(frozen=True)
@@ -108,15 +117,49 @@ class UserId:
             )
 ```
 
-Envuelve un `uuid.UUID`. Necesita `__str__()` porque JSON:API espera los
-IDs como string, y `from_string()` para reconstruir el VO desde un string.
+Cada entidad tiene su propio VO identificador fuertemente tipado (`CompanyId`, `RoleId`, `AssetId`, `LocationId`), implementados de la misma manera que `UserId`. Esto evita que por error pases el ID de una empresa a un método que espera el ID de un usuario.
 
-> [!NOTE]
-> Los value objects usan `@dataclass(frozen=True)`. Esto los hace
-> inmutables: después de creados, no se pueden modificar. Si necesitas un
-> valor diferente, creas una instancia nueva. La validación ocurre en
-> `__post_init__()`, que Python ejecuta automáticamente después de
-> `__init__`.
+## `Slug`
+
+Representa un slug URL-friendly e inmutable para las empresas. Vive en `src/app/domain/value_objects/slug.py`:
+
+```python
+@dataclass(frozen=True)
+class Slug:
+    value: str
+
+    _PATTERN = re.compile(r"^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$")
+
+    def __post_init__(self) -> None:
+        if not self.value or not isinstance(self.value, str):
+            raise ValueError("El slug no puede estar vacío.")
+        if not self._PATTERN.match(self.value):
+            raise ValueError(
+                f"El slug '{self.value}' tiene un formato inválido. "
+                "Solo se permiten letras minúsculas, dígitos y guiones, "
+                "sin comenzar ni terminar con guión."
+            )
+
+    @classmethod
+    def from_name(cls, name: str) -> "Slug":
+        import unicodedata
+        normalized = unicodedata.normalize("NFD", name.lower())
+        ascii_name = "".join(c for c in normalized if unicodedata.category(c) != "Mn")
+        slug = re.sub(r"[^a-z0-9]+", "-", ascii_name).strip("-")
+        return cls(value=slug[:63] if slug else "empresa")
+```
+
+El método fábrica `from_name()` normaliza cualquier texto (elimina acentos, convierte a minúsculas y reemplaza espacios por guiones) para crear slugs válidos de manera automática.
+
+<Callout type="info">
+
+Los value objects usan `@dataclass(frozen=True)`. Esto los hace
+inmutables: después de creados, no se pueden modificar. Si necesitas un
+valor diferente, creas una instancia nueva. La validación ocurre en
+`__post_init__()`, que Python ejecuta automáticamente después de
+`__init__`.
+
+</Callout>
 
 ## Próximos pasos
 
