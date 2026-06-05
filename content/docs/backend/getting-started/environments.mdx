@@ -18,8 +18,11 @@ DATABASE_URL=postgresql+asyncpg://sigma:sigma@localhost:5432/sigma_db
 REDIS_URL=redis://localhost:6379/0
 ```
 
-> [!TIP]
-> No utilices `.env` o `.env.local` dentro del contenedor. Docker resuelve los servicios `db` y `redis` a través de su propia red. Usa estos archivos de configuración únicamente cuando ejecutes `uvicorn` o `alembic` de forma directa en tu terminal.
+<Callout type="info">
+
+No utilices `.env` o `.env.local` dentro del contenedor. Docker resuelve los servicios `db` y `redis` a través de su propia red. Usa estos archivos de configuración únicamente cuando ejecutes `uvicorn` o `alembic` de forma directa en tu terminal.
+
+</Callout>
 
 ## Producción
 
@@ -42,8 +45,11 @@ docker run --env-file .env.prod -p 8000:8000 sigma-backend:latest
 
 Antes de dar por terminado el despliegue, te recomendamos realizar una prueba de humo (*smoke test*) para comprobar que los endpoints de autenticación funcionan correctamente.
 
-> [!NOTE]
-> Una prueba de humo es una verificación rápida que confirma que las funciones básicas y críticas de la aplicación responden de forma correcta tras un cambio o despliegue.
+<Callout type="info">
+
+Una prueba de humo es una verificación rápida que confirma que las funciones básicas y críticas de la aplicación responden de forma correcta tras un cambio o despliegue.
+
+</Callout>
 
 Una vez que el entorno esté activo, puedes verificar el flujo de autenticación ejecutando los siguientes comandos en tu terminal. Te recomendamos guardar los tokens en variables para facilitar las pruebas.
 

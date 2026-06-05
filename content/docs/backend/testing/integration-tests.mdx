@@ -9,10 +9,13 @@ Los tests de integración verifican que los adaptadores de infraestructura
 funcionan correctamente contra sus dependencias reales: PostgreSQL, Redis y
 las librerías de hashing/JWT.
 
-> [!NOTE]
-> Los tests de integración están por escribir. Los directorios
-> `tests/integration/` ya existen con los `conftest.py` y `__init__.py`
-> necesarios.
+<Callout type="info">
+
+Los tests de integración están por escribir. Los directorios
+`tests/integration/` ya existen con los `conftest.py` y `__init__.py`
+necesarios.
+
+</Callout>
 
 ## Requisitos
 
@@ -81,10 +84,13 @@ async def redis():
     await redis_client.flushdb()
 ```
 
-> [!WARNING]
-> Las fixtures de integración crean y destruyen tablas. En un entorno
-> compartido, usa un schema de base de datos temporal o una base de datos
-> dedicada para los tests.
+<Callout type="warn">
+
+Las fixtures de integración crean y destruyen tablas. En un entorno
+compartido, usa un schema de base de datos temporal o una base de datos
+dedicada para los tests.
+
+</Callout>
 
 ## Tests del repositorio
 

@@ -49,9 +49,11 @@ Si tienes experiencia con frameworks web tradicionales donde un controlador mane
 
 Los objetos de transferencia de datos o **DTO** (por sus siglas en inglés, *Data Transfer Object*) son estructuras de datos simples que transportan información entre la capa de presentación (FastAPI) y la capa de aplicación (casos de uso).
 
-> [!IMPORTANT]
-> **¿Por qué no usamos modelos de SQLAlchemy o esquemas de Pydantic aquí?**
-> La capa de aplicación no debe acoplarse a detalles de infraestructura. Pydantic está diseñado para la validación y serialización HTTP en la entrada del servidor, mientras que SQLAlchemy gestiona la persistencia. Al usar `dataclasses` nativas e inmutables (`frozen=True`) como DTO, aseguramos que el caso de uso reciba datos limpios y sin dependencias de librerías externas.
+<Callout type="warn" title="¿Por qué no usamos modelos de SQLAlchemy o esquemas de Pydantic aquí?">
+
+La capa de aplicación no debe acoplarse a detalles de infraestructura. Pydantic está diseñado para la validación y serialización HTTP en la entrada del servidor, mientras que SQLAlchemy gestiona la persistencia. Al usar `dataclasses` nativas e inmutables (`frozen=True`) como DTO, aseguramos que el caso de uso reciba datos limpios y sin dependencias de librerías externas.
+
+</Callout>
 
 Añade los DTO de entrada y salida al final del archivo `dtos.py`:
 
@@ -149,9 +151,11 @@ class UpdateProfileUseCase:
             )
 ```
 
-> [!NOTE]
-> **El gestor de transacciones (`async with self.uow`):**
-> Al iniciar el bloque `async with`, el Unit of Work crea automáticamente una sesión limpia de base de datos. Si todo el bloque se ejecuta sin errores y llamas a `commit()`, los cambios se persisten de forma atómica en PostgreSQL. Si ocurre alguna excepción (por ejemplo, `UserAlreadyExistsError`), el bloque se cierra automáticamente y ejecuta un `rollback` de cualquier cambio pendiente, protegiendo la consistencia del sistema.
+<Callout type="info" title="El gestor de transacciones (`async with self.uow`):">
+
+Al iniciar el bloque `async with`, el Unit of Work crea automáticamente una sesión limpia de base de datos. Si todo el bloque se ejecuta sin errores y llamas a `commit()`, los cambios se persisten de forma atómica en PostgreSQL. Si ocurre alguna excepción (por ejemplo, `UserAlreadyExistsError`), el bloque se cierra automáticamente y ejecuta un `rollback` de cualquier cambio pendiente, protegiendo la consistencia del sistema.
+
+</Callout>
 
 ---
 
@@ -234,9 +238,11 @@ class UpdateProfileRequest(BaseModel):
     data: UpdateProfileResource
 ```
 
-> [!NOTE]
-> **Estructura JSON:API:**
-> La especificación JSON:API exige que toda estructura de datos compleja viaje envuelta en un objeto raíz llamado `data`. Este objeto contiene obligatoriamente un campo `type` que define el recurso y una propiedad `attributes` con los datos reales del modelo. Las respuestas del perfil de usuario reutilizan el esquema `UserDocument` que ya está declarado en este mismo archivo.
+<Callout type="info" title="Estructura JSON:API:">
+
+La especificación JSON:API exige que toda estructura de datos compleja viaje envuelta en un objeto raíz llamado `data`. Este objeto contiene obligatoriamente un campo `type` que define el recurso y una propiedad `attributes` con los datos reales del modelo. Las respuestas del perfil de usuario reutilizan el esquema `UserDocument` que ya está declarado en este mismo archivo.
+
+</Callout>
 
 ---
 

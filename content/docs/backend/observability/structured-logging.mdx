@@ -114,10 +114,13 @@ structlog.contextvars.bind_contextvars(request_id=request.state.request_id)
 El procesador `merge_contextvars` lo incluirá automáticamente en cada entrada
 de log dentro de ese contexto.
 
-> [!NOTE]
-> La vinculación automática de `request_id` al contextvar de structlog aún no
-> está implementada. Actualmente el `RequestIdMiddleware` asigna el ID al
-> `request.state`, pero no lo inyecta en contextvars. Esto está planeado.
+<Callout type="info">
+
+La vinculación automática de `request_id` al contextvar de structlog aún no
+está implementada. Actualmente el `RequestIdMiddleware` asigna el ID al
+`request.state`, pero no lo inyecta en contextvars. Esto está planeado.
+
+</Callout>
 
 ## Próximos pasos
 

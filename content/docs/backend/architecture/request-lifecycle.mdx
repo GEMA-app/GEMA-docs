@@ -54,8 +54,11 @@ Los middlewares globales interceptan la petición en el orden en que fueron regi
 3. **`accept`:** Comprueba que la cabecera `Accept` del cliente sea compatible con la respuesta JSON:API del sistema.
 4. **`rate_limit`:** Evalúa y contabiliza la tasa de solicitudes usando Redis. Si Redis experimenta problemas de comunicación, el middleware permite el paso de la petición (fail-open).
 
-> [!NOTE]
-> **El papel de los middlewares:** Actúan como filtros interceptores que envuelven la ejecución del resto del backend, ideales para resolver requisitos globales como auditoría, seguridad o validaciones básicas de protocolo.
+<Callout type="info">
+
+**El papel de los middlewares:** Actúan como filtros interceptores que envuelven la ejecución del resto del backend, ideales para resolver requisitos globales como auditoría, seguridad o validaciones básicas de protocolo.
+
+</Callout>
 
 ### 3. Enrutamiento (Router)
 

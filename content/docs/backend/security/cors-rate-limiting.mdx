@@ -11,9 +11,12 @@ configuran como middlewares de FastAPI.
 
 ## CORS
 
-> [!NOTE]
-> La configuración de CORS aún no está implementada en `main.py`. Esta sección
-> describe cómo debe configurarse.
+<Callout type="info">
+
+La configuración de CORS aún no está implementada en `main.py`. Esta sección
+describe cómo debe configurarse.
+
+</Callout>
 
 FastAPI incluye `CORSMiddleware` para gestionar solicitudes entre orígenes
 distintos. Debes añadirlo en `main.py` antes que los demás middlewares:
@@ -44,9 +47,12 @@ app.add_middleware(
 | Staging | Dominios específicos | Sí |
 | Producción | Dominios específicos | Sí |
 
-> [!WARNING]
-> En producción, nunca uses `allow_origins=["*"]` si usas
-> `allow_credentials=True`. El navegador lo rechazará.
+<Callout type="warn">
+
+En producción, nunca uses `allow_origins=["*"]` si usas
+`allow_credentials=True`. El navegador lo rechazará.
+
+</Callout>
 
 ## Rate limiting
 

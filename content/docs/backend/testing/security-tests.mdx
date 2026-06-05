@@ -5,10 +5,13 @@ description: Pruebas de los mecanismos de seguridad, incluyendo validación de c
 
 # Tests de seguridad
 
-> [!NOTE]
-> Esta es una funcionalidad experimental que aún está en desarrollo activo.
-> No hay tests de seguridad implementados todavía. Esta página describe los
-> casos previstos.
+<Callout type="info">
+
+Esta es una funcionalidad experimental que aún está en desarrollo activo.
+No hay tests de seguridad implementados todavía. Esta página describe los
+casos previstos.
+
+</Callout>
 
 Los tests de seguridad verifican que los mecanismos de protección de GEMA se
 comportan correctamente tanto en condiciones normales como en escenarios
@@ -141,11 +144,14 @@ class TestRateLimiting:
             "ERR_TOO_MANY_REQUESTS"
 ```
 
-> [!WARNING]
-> El test de rate limiting depende de que las solicitudes compartan la misma
-> IP. Con `httpx.AsyncClient` y `ASGITransport`, `request.client.host` puede
-> ser `"127.0.0.1"` o `"test"`. Ajusta la extracción de IP en el test o
-> configura el cliente para que envíe `X-Forwarded-For`.
+<Callout type="warn">
+
+El test de rate limiting depende de que las solicitudes compartan la misma
+IP. Con `httpx.AsyncClient` y `ASGITransport`, `request.client.host` puede
+ser `"127.0.0.1"` o `"test"`. Ajusta la extracción de IP en el test o
+configura el cliente para que envíe `X-Forwarded-For`.
+
+</Callout>
 
 ## Fail-open en Redis
 

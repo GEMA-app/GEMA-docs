@@ -33,11 +33,14 @@ email = Email(value="invalido")        # → InvalidEmailError
 password = PlainPassword(value="123")  # → WeakPasswordError
 ```
 
-> [!WARNING]
-> Las reglas de negocio viven en el dominio, no en la base de datos ni en
-> la presentación. No uses restricciones CHECK de PostgreSQL ni validación
-> Pydantic para reglas de negocio. El dominio es el único responsable de
-> decir qué está permitido y qué no.
+<Callout type="warn">
+
+Las reglas de negocio viven en el dominio, no en la base de datos ni en
+la presentación. No uses restricciones CHECK de PostgreSQL ni validación
+Pydantic para reglas de negocio. El dominio es el único responsable de
+decir qué está permitido y qué no.
+
+</Callout>
 
 ## Reglas de orquestación
 

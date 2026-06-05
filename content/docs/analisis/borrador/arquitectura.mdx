@@ -54,17 +54,19 @@ graph TD
 
 La infraestructura está completamente definida como código mediante Docker Compose, lo que permite que cualquier desarrollador del equipo levante el stack completo con el comando `docker-compose up` sin configuraciones adicionales.
 
-> [!TIP]
-> **Entorno de Desarrollo**  
-> Stack completo en Docker con volúmenes montados para hot reload. Base de datos local aislada de producción.
+<Callout type="info" title="Entorno de Desarrollo">
 
-> [!IMPORTANT]
-> **Entorno de Producción**  
-> Droplet de DigitalOcean (1 GB RAM / 1 vCPU / 25 GB SSD, $6/mes) con imagen Docker preinstalada. Nginx como proxy inverso con HTTPS vía Let's Encrypt.
+Stack completo en Docker con volúmenes montados para hot reload. Base de datos local aislada de producción.
 
-> [!NOTE]
-> **CI/CD y Control de Versiones**  
-> - **CI/CD**: GitHub Actions despliega automáticamente al servidor tras cada merge a la rama main, eliminando el proceso manual de actualización.  
-> - **Control de Versiones**: Flujo de ramas con develop como rama de integración y main como rama de producción. Pull Requests obligatorios con revisión de líderes de área.
+[!IMPORTANT]
+**Entorno de Producción**  
+Droplet de DigitalOcean (1 GB RAM / 1 vCPU / 25 GB SSD, $6/mes) con imagen Docker preinstalada. Nginx como proxy inverso con HTTPS vía Let's Encrypt.
+
+[!NOTE]
+**CI/CD y Control de Versiones**  
+- **CI/CD**: GitHub Actions despliega automáticamente al servidor tras cada merge a la rama main, eliminando el proceso manual de actualización.  
+- **Control de Versiones**: Flujo de ramas con develop como rama de integración y main como rama de producción. Pull Requests obligatorios con revisión de líderes de área.
+
+</Callout>
 
 <br />

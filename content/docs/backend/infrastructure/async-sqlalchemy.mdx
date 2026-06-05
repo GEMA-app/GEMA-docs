@@ -48,11 +48,14 @@ Parámetros clave:
 - `autoflush=False` — evita flushes automáticos antes de cada consulta. El
   control del flush queda en el Unit of Work.
 
-> [!NOTE]
-> Con `expire_on_commit=True` (valor por defecto), después de `commit()`
-> todos los objetos quedan en estado "expired" y任何 acceso a atributos
-> dispara una consulta SQL adicional. Con `False` los objetos mantienen sus
-> datos.
+<Callout type="info">
+
+Con `expire_on_commit=True` (valor por defecto), después de `commit()`
+todos los objetos quedan en estado "expired" y任何 acceso a atributos
+dispara una consulta SQL adicional. Con `False` los objetos mantienen sus
+datos.
+
+</Callout>
 
 ## Generador para inyección
 
@@ -84,10 +87,13 @@ class Base(AsyncAttrs, DeclarativeBase):
 `models.py` para evitar **importaciones circulares** cuando Alembic necesita
 importar `Base.metadata`.
 
-> [!WARNING]
-> No agregues modelos directamente en `base.py`. `Base` debe ser un archivo
-> mínimo que solo importe `AsyncAttrs` y `DeclarativeBase`. Los modelos van
-> en `models.py` e importan `Base` desde aquí.
+<Callout type="warn">
+
+No agregues modelos directamente en `base.py`. `Base` debe ser un archivo
+mínimo que solo importe `AsyncAttrs` y `DeclarativeBase`. Los modelos van
+en `models.py` e importan `Base` desde aquí.
+
+</Callout>
 
 ## Próximos pasos
 

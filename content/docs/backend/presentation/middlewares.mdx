@@ -26,9 +26,12 @@ Pipeline de ejecución (petición entrante):
 RequestId → ContentType → Accept → RateLimit → Endpoint → RateLimit → Accept → ContentType → RequestId
 ```
 
-> [!NOTE]
-> `BaseHTTPMiddleware` de Starlette envuelve cada petición. El código antes
-> de `call_next()` se ejecuta al entrar; después de `call_next()`, al salir.
+<Callout type="info">
+
+`BaseHTTPMiddleware` de Starlette envuelve cada petición. El código antes
+de `call_next()` se ejecuta al entrar; después de `call_next()`, al salir.
+
+</Callout>
 
 ## `RequestIdMiddleware`
 
@@ -114,10 +117,13 @@ rate_limit_script = redis_client.register_script(LUA_SCRIPT)
   clave de rate limiting.
 - Si Redis falla, permite la petición (fail-open) y registra el error.
 
-> [!NOTE]
-> **Fail-open**: si Redis no responde, el middleware deja pasar la
-> petición y registra el error. Es preferible permitir más peticiones de
-> las debidas a bloquear toda la API.
+<Callout type="info">
+
+**Fail-open**: si Redis no responde, el middleware deja pasar la
+petición y registra el error. Es preferible permitir más peticiones de
+las debidas a bloquear toda la API.
+
+</Callout>
 
 ## Middlewares planeados
 

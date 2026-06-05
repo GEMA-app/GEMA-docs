@@ -49,11 +49,14 @@ Verifica que la aplicación puede conectarse a **PostgreSQL** (hace una
 conexión al engine) y a **Redis** (ejecuta `PING`). Si alguno falla,
 retorna 503.
 
-> [!NOTE]
-> La diferencia entre liveness y readiness: **liveness** dice "el proceso
-> está vivo", **readiness** dice "el proceso está listo para recibir
-> tráfico". En Kubernetes, readiness determina si el pod recibe peticiones;
-> liveness determina si se reinicia.
+<Callout type="info">
+
+La diferencia entre liveness y readiness: **liveness** dice "el proceso
+está vivo", **readiness** dice "el proceso está listo para recibir
+tráfico". En Kubernetes, readiness determina si el pod recibe peticiones;
+liveness determina si se reinicia.
+
+</Callout>
 
 ## Registro
 

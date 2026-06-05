@@ -54,9 +54,12 @@ class BcryptPasswordHasher(PasswordHasherPort):
             return False
 ```
 
-> [!NOTE]
-> Siempre codifica las contraseñas a bytes con `.encode("utf-8")` antes de
-> pasarlas a `bcrypt`. La librería trabaja exclusivamente con bytes.
+<Callout type="info">
+
+Siempre codifica las contraseñas a bytes con `.encode("utf-8")` antes de
+pasarlas a `bcrypt`. La librería trabaja exclusivamente con bytes.
+
+</Callout>
 
 ### Reglas de fortaleza de contraseña
 
@@ -165,9 +168,12 @@ async def decode_token(self, token: str) -> dict[str, Any]:
     return claims
 ```
 
-> [!IMPORTANT]
-> Siempre usa `options={"require": [...]}` para exigir los claims mínimos.
-> Sin esta opción, PyJWT no valida la presencia de `exp`, `sub` o `jti`.
+<Callout type="warn">
+
+Siempre usa `options={"require": [...]}` para exigir los claims mínimos.
+Sin esta opción, PyJWT no valida la presencia de `exp`, `sub` o `jti`.
+
+</Callout>
 
 ## Revocación de tokens (Redis blocklist)
 
@@ -182,9 +188,12 @@ async def revoke_token(self, jti: str, exp: int) -> None:
         await self.redis.set(f"blocklist:{jti}", "revoked", ex=ttl)
 ```
 
-> [!WARNING]
-> El TTL es obligatorio. Si no estableces un TTL, la blocklist crece
-> indefinidamente y consume toda la memoria de Redis.
+<Callout type="warn">
+
+El TTL es obligatorio. Si no estableces un TTL, la blocklist crece
+indefinidamente y consume toda la memoria de Redis.
+
+</Callout>
 
 ### ¿Cuándo se revocan tokens?
 

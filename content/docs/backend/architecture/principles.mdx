@@ -18,8 +18,11 @@ src/app/infrastructure/repositories/     →  SqlAlchemyUserRepository(UserRepos
 
 Los puertos se definen mediante clases `Protocol` de Python. Cualquier clase que cumpla con los métodos y firmas del puerto es compatible de forma estructural, sin necesidad de heredar directamente de la clase base.
 
-> [!NOTE]
-> **El principio de inversión de dependencias (DIP):** Establece que los módulos de alto nivel no deben depender de módulos de bajo nivel; ambos deben depender de abstracciones. En nuestro proyecto, las abstracciones se definen en la capa de aplicación como puertos y las implementaciones de bajo nivel en la infraestructura como adaptadores.
+<Callout type="info">
+
+**El principio de inversión de dependencias (DIP):** Establece que los módulos de alto nivel no deben depender de módulos de bajo nivel; ambos deben depender de abstracciones. En nuestro proyecto, las abstracciones se definen en la capa de aplicación como puertos y las implementaciones de bajo nivel en la infraestructura como adaptadores.
+
+</Callout>
 
 <details>
 <summary>Detalles técnicos e historia del patrón</summary>
@@ -49,8 +52,11 @@ async with self.uow:
 
 La implementación `SqlAlchemyUnitOfWork` instancia los repositorios compartiendo una misma sesión de base de datos activa. Esto asegura la atomicidad de las operaciones y evita la inyección individual de sesiones en múltiples repositorios.
 
-> [!WARNING]
-> **Responsabilidad del commit:** Los repositorios individuales nunca deben realizar un commit en la base de datos (por ejemplo, `session.commit()`). Su única responsabilidad es añadir o eliminar entidades del contexto de persistencia. La confirmación o reversión es competencia exclusiva de la unidad de trabajo (UoW).
+<Callout type="warn">
+
+**Responsabilidad del commit:** Los repositorios individuales nunca deben realizar un commit en la base de datos (por ejemplo, `session.commit()`). Su única responsabilidad es añadir o eliminar entidades del contexto de persistencia. La confirmación o reversión es competencia exclusiva de la unidad de trabajo (UoW).
+
+</Callout>
 
 <details>
 <summary>Detalles técnicos e historia del patrón</summary>
@@ -193,8 +199,11 @@ except RedisError as error:
     return await call_next(request)
 ```
 
-> [!NOTE]
-> **Estrategias fail-open vs fail-closed:** Una arquitectura *fail-open* prioriza la disponibilidad del servicio permitiendo operaciones críticas si un componente secundario falla. Una estrategia *fail-closed* bloquea todo acceso por motivos de seguridad. En GEMA Backend preferimos mantener el servicio HTTP disponible ante fallos temporales de la caché de Redis.
+<Callout type="info">
+
+**Estrategias fail-open vs fail-closed:** Una arquitectura *fail-open* prioriza la disponibilidad del servicio permitiendo operaciones críticas si un componente secundario falla. Una estrategia *fail-closed* bloquea todo acceso por motivos de seguridad. En GEMA Backend preferimos mantener el servicio HTTP disponible ante fallos temporales de la caché de Redis.
+
+</Callout>
 
 ## Gestión segura de tokens JWT
 

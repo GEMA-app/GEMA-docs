@@ -27,8 +27,11 @@ infrastructure → application → domain
 
 La regla fundamental de esta estructura es que las dependencias solo fluyen hacia el interior. El dominio no conoce la existencia de la aplicación ni de la infraestructura. La comunicación entre las capas externas e internas se realiza mediante interfaces abstractas llamadas puertos.
 
-> [!NOTE]
-> **¿Qué es un `Protocol` en Python?** Es una forma de definir interfaces estructurales utilizando tipado estático (duck typing en tiempo de compilación). Permite definir un contrato de comportamiento sin forzar la herencia explícita, facilitando el desacoplamiento entre las capas de aplicación e infraestructura.
+<Callout type="info">
+
+**¿Qué es un `Protocol` en Python?** Es una forma de definir interfaces estructurales utilizando tipado estático (duck typing en tiempo de compilación). Permite definir un contrato de comportamiento sin forzar la herencia explícita, facilitando el desacoplamiento entre las capas de aplicación e infraestructura.
+
+</Callout>
 
 ## Capa de dominio (domain)
 
@@ -57,8 +60,11 @@ La capa de infraestructura contiene las implementaciones de bajo nivel y los det
 - **Seguridad:** Implementación de hashing de contraseñas con bcrypt y servicios de generación y validación de tokens JWT.
 - **Unidad de trabajo (Unit of Work):** Gestor de contexto asíncrono (`SqlAlchemyUnitOfWork`) que coordina transacciones atómicas y comparte la sesión de base de datos con los repositorios.
 
-> [!NOTE]
-> **El concepto de adaptador:** Un adaptador es una clase de infraestructura que implementa un puerto de la aplicación. Por ejemplo, `SqlAlchemyUserRepository` es el adaptador concreto para el puerto `UserRepositoryPort`. El núcleo del sistema solo se comunica a través del puerto, ignorando los detalles del adaptador.
+<Callout type="info">
+
+**El concepto de adaptador:** Un adaptador es una clase de infraestructura que implementa un puerto de la aplicación. Por ejemplo, `SqlAlchemyUserRepository` es el adaptador concreto para el puerto `UserRepositoryPort`. El núcleo del sistema solo se comunica a través del puerto, ignorando los detalles del adaptador.
+
+</Callout>
 
 ## Capa de presentación (presentation)
 

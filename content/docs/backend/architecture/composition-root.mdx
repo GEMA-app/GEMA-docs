@@ -13,8 +13,11 @@ En una arquitectura hexagonal hay un solo lugar donde se crean los objetos concr
 
 La regla de diseño es estricta: la capa de presentación nunca debe instanciar componentes de infraestructura de forma directa. Los endpoints de FastAPI no crean repositorios, conexiones a Redis ni clientes de correo. Todo se construye en el contenedor y se proporciona mediante inyección de dependencias.
 
-> [!NOTE]
-> **Inyección de dependencias (DI):** Es el patrón de diseño donde un objeto recibe sus dependencias desde el exterior en lugar de instanciarlas internamente. El **contenedor** actúa como la factoría que orquesta y suministra estas dependencias. No pases el contenedor a las capas internas; utilízalo únicamente para la composición inicial.
+<Callout type="info">
+
+**Inyección de dependencias (DI):** Es el patrón de diseño donde un objeto recibe sus dependencias desde el exterior en lugar de instanciarlas internamente. El **contenedor** actúa como la factoría que orquesta y suministra estas dependencias. No pases el contenedor a las capas internas; utilízalo únicamente para la composición inicial.
+
+</Callout>
 
 ## El contenedor (`container.py`)
 

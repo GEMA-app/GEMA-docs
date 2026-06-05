@@ -12,11 +12,14 @@ Es el núcleo del proyecto. No importa nada de FastAPI, SQLAlchemy, Redis ni
 ninguna biblioteca externa. Solo contiene código puro de Python con las
 reglas de negocio, las validaciones y los eventos que ocurren en el sistema.
 
-> [!NOTE]
-> La capa de dominio es la única que no tiene dependencias. Puedes extraer
-> toda la carpeta `domain/` a un proyecto aparte y seguiría funcionando sin
-> cambios. Eso es lo que la hace tan valiosa: las reglas de negocio no se
-> contaminan con detalles técnicos.
+<Callout type="info">
+
+La capa de dominio es la única que no tiene dependencias. Puedes extraer
+toda la carpeta `domain/` a un proyecto aparte y seguiría funcionando sin
+cambios. Eso es lo que la hace tan valiosa: las reglas de negocio no se
+contaminan con detalles técnicos.
+
+</Callout>
 
 ## Componentes del dominio
 

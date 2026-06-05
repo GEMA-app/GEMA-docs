@@ -33,10 +33,13 @@ def run_async_migrations() -> None:
     # ...
 ```
 
-> [!WARNING]
-> `env.py` debe importar solo `Base` y los modelos para poblar
-> `target_metadata`. No importes lógica de aplicación que cause side
-> effects (como crear clientes de Redis o inicializar logging).
+<Callout type="warn">
+
+`env.py` debe importar solo `Base` y los modelos para poblar
+`target_metadata`. No importes lógica de aplicación que cause side
+effects (como crear clientes de Redis o inicializar logging).
+
+</Callout>
 
 ## Crear una migración
 
@@ -66,10 +69,13 @@ Este comando ejecuta todas las migraciones pendientes hasta la más reciente.
 - El archivo `alembic.ini` se genera dentro del contenedor con `alembic init`
   y se copia al host si es necesario.
 
-> [!WARNING]
-> Nunca montes `alembic.ini` como volumen antes de que el archivo exista en
-> el host. Si Docker no lo encuentra, crea un directorio en su lugar y
-> corrompe el entorno.
+<Callout type="warn">
+
+Nunca montes `alembic.ini` como volumen antes de que el archivo exista en
+el host. Si Docker no lo encuentra, crea un directorio en su lugar y
+corrompe el entorno.
+
+</Callout>
 
 ## Verificación
 

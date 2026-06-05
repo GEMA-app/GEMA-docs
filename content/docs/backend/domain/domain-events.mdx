@@ -6,10 +6,13 @@ description: DomainEvent, UserRegistered y UserLoggedIn, registro de lo que ocur
 Los eventos de dominio registran algo que ya ocurrió en el sistema. Son
 inmutables, tienen un identificador único y una marca de tiempo.
 
-> [!NOTE]
-> Un evento de dominio describe algo que **ya pasó** (pasado). No es un
-> comando ni una instrucción. `UserRegistered` significa "el usuario ya se
-> registró", no "registra al usuario".
+<Callout type="info">
+
+Un evento de dominio describe algo que **ya pasó** (pasado). No es un
+comando ni una instrucción. `UserRegistered` significa "el usuario ya se
+registró", no "registra al usuario".
+
+</Callout>
 
 ## Clase base
 

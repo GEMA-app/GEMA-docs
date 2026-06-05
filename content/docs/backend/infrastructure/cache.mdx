@@ -30,10 +30,13 @@ async def get_redis() -> aioredis.Redis:
 El cliente se crea una sola vez al importar el módulo y se reusa durante
 toda la vida de la aplicación.
 
-> [!NOTE]
-> `decode_responses=True` hace que Redis devuelva strings en lugar de
-> bytes. Así trabajas con `str` directamente sin tener que llamar a
-> `.decode('utf-8')` en cada respuesta.
+<Callout type="info">
+
+`decode_responses=True` hace que Redis devuelva strings en lugar de
+bytes. Así trabajas con `str` directamente sin tener que llamar a
+`.decode('utf-8')` en cada respuesta.
+
+</Callout>
 
 ## Uso en blocklist JWT
 
@@ -80,10 +83,13 @@ return current
 El script se ejecuta como una sola operación atómica en Redis, evitando
 race conditions entre `INCR` y `EXPIRE`.
 
-> [!NOTE]
-> El rate limiter usa **fail-open**: si Redis no responde, la petición se
-> permite y se registra un error. Es preferible permitir más peticiones de
-> las debidas a bloquear toda la API.
+<Callout type="info">
+
+El rate limiter usa **fail-open**: si Redis no responde, la petición se
+permite y se registra un error. Es preferible permitir más peticiones de
+las debidas a bloquear toda la API.
+
+</Callout>
 
 ## Próximos pasos
 

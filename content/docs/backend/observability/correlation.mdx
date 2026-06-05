@@ -5,9 +5,12 @@ description: Identificación de solicitudes mediante correlación con RequestIdM
 
 # Correlation
 
-> [!NOTE]
-> La propagación de identificadores de correlación a través de contextvars de
-> structlog es una funcionalidad experimental en desarrollo activo.
+<Callout type="info">
+
+La propagación de identificadores de correlación a través de contextvars de
+structlog es una funcionalidad experimental en desarrollo activo.
+
+</Callout>
 
 La correlación permite rastrear una solicitud a través de los diferentes
 componentes del sistema. Cada petición recibe un identificador único (UUID)

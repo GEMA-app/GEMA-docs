@@ -57,9 +57,12 @@ if claims.get("type") != "access":
     )
 ```
 
-> [!NOTE]
-> El token de refresco solo se puede usar en el endpoint `/v1/auth/refresh`.
-> Intentar usarlo en `/v1/auth/me` o `/v1/auth/logout` produce un error 401.
+<Callout type="info">
+
+El token de refresco solo se puede usar en el endpoint `/v1/auth/refresh`.
+Intentar usarlo en `/v1/auth/me` o `/v1/auth/logout` produce un error 401.
+
+</Callout>
 
 ## Verificación de usuario activo
 
