@@ -1,0 +1,416 @@
+---
+title: Crear un nuevo endpoint de la API
+description: Paso a paso detallado para añadir un endpoint REST con arquitectura hexagonal y el estándar JSON:API
+---
+
+Esta guía te guiará paso a paso para añadir un nuevo endpoint a la API del backend. Aprenderás a escribir el código para cada capa del sistema, desde la lógica de negocio hasta la ruta pública expuesta al cliente.
+
+Como ejemplo práctico, implementaremos un endpoint `PATCH /v1/auth/profile` que permite a un usuario autenticado actualizar su dirección de correo electrónico.
+
+## Prerrequisitos
+
+Antes de comenzar a escribir código, te recomendamos revisar los conceptos base de nuestra arquitectura:
+
+- [Resumen de capas del sistema](../architecture/layers-overview): para entender dónde reside cada tipo de lógica.
+- [Raíz de composición](../architecture/composition-root): para comprender cómo se conectan y construyen los objetos.
+- [Ciclo de vida de una petición](../architecture/request-lifecycle): para seguir el camino de una solicitud desde que llega hasta que se responde.
+
+## Resumen de archivos a modificar
+
+Para crear el endpoint del ejemplo, trabajarás con la siguiente secuencia de archivos. Puedes usar esta tabla como una lista de verificación:
+
+| Paso | Capa | Archivo | ¿Es obligatorio? |
+|---|---|---|---|
+| **1** | Aplicación | `src/app/application/dtos.py` | Sí (define la estructura de datos) |
+| **2** | Aplicación | `src/app/application/use_cases/update_profile.py` | Sí (contiene la lógica del caso de uso) |
+| **3** | Aplicación | `src/app/application/ports/` | Opcional (solo si necesitas un adaptador nuevo) |
+| **4** | Dominio | `src/app/domain/exceptions.py` | Opcional (solo si creas un error de negocio nuevo) |
+| **5** | Presentación | `src/app/presentation/api/v1/schemas/auth.py` | Sí (valida la entrada/salida HTTP) |
+| **6** | Presentación | `src/app/presentation/exception_handlers.py` | Opcional (solo si creaste una excepción en el paso 4) |
+| **7** | Presentación | `src/app/presentation/api/v1/endpoints/auth.py` | Sí (define la ruta HTTP de FastAPI) |
+| **8** | Composición | `src/app/composition/container.py` | Sí (crea e inyecta la instancia del caso de uso) |
+| **9** | Presentación | `src/app/presentation/api/v1/router.py` | Opcional (solo si creas un controlador de rutas nuevo) |
+
+---
+
+## ¿Por qué debemos modificar tantos archivos?
+
+Si tienes experiencia con frameworks web tradicionales donde un controlador maneja la ruta, valida los datos y consulta la base de datos en un solo lugar, crear tantos archivos puede parecerte redundante. Sin embargo, en GEMA utilizamos arquitectura hexagonal para resolver problemas prácticos del desarrollo a gran escala:
+
+- **Desacoplamiento técnico**: Tu lógica de negocio (casos de uso) no sabe si la petición se inició desde una API web, una consola de comandos o una tarea en segundo plano. Tampoco sabe si la base de datos es PostgreSQL o una simulación en memoria. Al separar estas responsabilidades, puedes cambiar cualquier tecnología externa sin tocar el negocio.
+- **Validación por capas**: Cada archivo actúa como un filtro. Los esquemas de Pydantic aseguran que los datos recibidos por la web sean correctos; los DTO los transportan limpios; y las entidades del dominio garantizan que se cumplan las reglas de negocio antes de guardar los datos.
+- **Facilidad para realizar pruebas**: Al estar las responsabilidades separadas, puedes escribir pruebas rápidas para tu lógica de negocio simulando los componentes de infraestructura en milisegundos, sin necesidad de conectar una base de datos real.
+
+---
+
+## Paso 1: Definir los DTO
+
+**Archivo:** `src/app/application/dtos.py`
+
+Los objetos de transferencia de datos o **DTO** (por sus siglas en inglés, *Data Transfer Object*) son estructuras de datos simples que transportan información entre la capa de presentación (FastAPI) y la capa de aplicación (casos de uso).
+
+<Callout type="warn" title="¿Por qué no usamos modelos de SQLAlchemy o esquemas de Pydantic aquí?">
+
+La capa de aplicación no debe acoplarse a detalles de infraestructura. Pydantic está diseñado para la validación y serialización HTTP en la entrada del servidor, mientras que SQLAlchemy gestiona la persistencia. Al usar `dataclasses` nativas e inmutables (`frozen=True`) como DTO, aseguramos que el caso de uso reciba datos limpios y sin dependencias de librerías externas.
+
+</Callout>
+
+Añade los DTO de entrada y salida al final del archivo `dtos.py`:
+
+```python
+from dataclasses import dataclass
+from datetime import datetime
+
+@dataclass(frozen=True)
+class UpdateProfileRequest:
+    """Estructura de entrada para actualizar los datos de perfil."""
+    email: str
+
+
+@dataclass(frozen=True)
+class UpdateProfileResponse:
+    """Estructura de salida con los datos del perfil actualizado."""
+    id: str
+    email: str
+    is_active: bool
+    created_at: datetime
+    updated_at: datetime
+```
+
+---
+
+## Paso 2: Crear el caso de uso
+
+**Archivo nuevo:** `src/app/application/use_cases/update_profile.py`
+
+El caso de uso es el cerebro de la operación. Representa una acción específica que el usuario puede realizar en el sistema. Su responsabilidad es coordinar las entidades del dominio y los servicios de infraestructura para cumplir con la regla de negocio.
+
+Crea el archivo `update_profile.py` y escribe el siguiente código:
+
+```python
+from app.application.dtos import UpdateProfileRequest, UpdateProfileResponse
+from app.application.ports.auth import TokenServicePort
+from app.application.ports.unit_of_work import UnitOfWorkPort
+from app.domain.exceptions import InvalidTokenError, UserAlreadyExistsError
+from app.domain.value_objects import Email, UserId
+
+
+class UpdateProfileUseCase:
+    """Coordinador de la actualización del correo electrónico del usuario."""
+
+    def __init__(
+        self,
+        uow: UnitOfWorkPort,
+        token_service: TokenServicePort,
+    ) -> None:
+        # Recibimos interfaces (puertos), no clases concretas de base de datos
+        self.uow = uow
+        self.token_service = token_service
+
+    async def execute(
+        self, token: str, request: UpdateProfileRequest
+    ) -> UpdateProfileResponse:
+        """Valida las credenciales del usuario y actualiza su email transaccionalmente."""
+        # 1. Validar y decodificar el JWT
+        payload = await self.token_service.decode_token(token)
+        user_id = UserId.from_string(payload["sub"])
+        
+        # 2. Convertir el string en un Objeto de Valor del dominio (email)
+        new_email = Email(value=request.email)
+
+        # 3. Iniciar la transacción mediante la Unidad de Trabajo (Unit of Work)
+        async with self.uow:
+            # Consultar si el usuario existe
+            user = await self.uow.users.get_by_id(user_id)
+            if not user:
+                raise InvalidTokenError("El usuario no existe en el sistema.")
+
+            # Validar que el nuevo correo no esté registrado por otra persona
+            existing = await self.uow.users.get_by_email(new_email)
+            if existing and existing.id != user.id:
+                raise UserAlreadyExistsError(
+                    f"El correo electrónico '{request.email}' ya está registrado."
+                )
+
+            # Modificar el estado de la entidad (regla de negocio en el dominio)
+            user.email = new_email
+            
+            # Guardar en el repositorio (el repositorio solo encola el cambio en memoria)
+            await self.uow.users.save(user)
+            
+            # Confirmar la transacción físicamente en PostgreSQL
+            await self.uow.commit()
+
+            # 4. Devolver la respuesta mapeada a nuestro DTO de salida
+            return UpdateProfileResponse(
+                id=str(user.id),
+                email=user.email.value,
+                is_active=user.is_active,
+                created_at=user.created_at,
+                updated_at=user.updated_at,
+            )
+```
+
+<Callout type="info" title="El gestor de transacciones (`async with self.uow`):">
+
+Al iniciar el bloque `async with`, el Unit of Work crea automáticamente una sesión limpia de base de datos. Si todo el bloque se ejecuta sin errores y llamas a `commit()`, los cambios se persisten de forma atómica en PostgreSQL. Si ocurre alguna excepción (por ejemplo, `UserAlreadyExistsError`), el bloque se cierra automáticamente y ejecuta un `rollback` de cualquier cambio pendiente, protegiendo la consistencia del sistema.
+
+</Callout>
+
+---
+
+## Paso 3: Revisar o crear puertos
+
+**Directorio:** `src/app/application/ports/`
+
+Los puertos son interfaces (declaradas con `typing.Protocol` en Python) que definen los métodos mínimos que la infraestructura debe implementar. 
+
+En nuestro ejemplo, ya contamos con los puertos necesarios:
+- `UserRepositoryPort` en `ports/repository.py` (con los métodos `get_by_id`, `get_by_email` y `save`).
+- `TokenServicePort` en `ports/auth.py` (con el método `decode_token`).
+
+Por lo tanto, no necesitamos añadir ningún puerto. 
+
+<details>
+<summary>¿Cuándo deberías crear un puerto nuevo?</summary>
+
+Si tu caso de uso necesita interactuar con una herramienta externa que no está en el dominio, como enviar un SMS o procesar un archivo PDF, debes crear un archivo de puerto en esta carpeta:
+
+```python
+# src/app/application/ports/sms.py
+from typing import Protocol
+
+class SmsSenderPort(Protocol):
+    """Contrato que debe cumplir cualquier adaptador de envío de SMS."""
+    async def send_sms(self, phone: str, message: str) -> None:
+        ...
+```
+Luego, en la capa de infraestructura, escribirás la clase concreta que implementa este protocolo (por ejemplo, usando Twilio).
+
+</details>
+
+---
+
+## Paso 4: Definir excepciones del dominio
+
+**Archivo:** `src/app/domain/exceptions.py`
+
+Si tu caso de uso necesita controlar condiciones de error específicas que afecten a las reglas de negocio, debes declarar esas excepciones en la capa de dominio. Esto ayuda a evitar el uso de excepciones genéricas de Python (como `ValueError` o `Exception`).
+
+En nuestro caso, el archivo ya incluye `InvalidTokenError` y `UserAlreadyExistsError`. Si necesitaras añadir una excepción propia de esta acción, la declararías al final del archivo:
+
+```python
+class ProfileUpdateException(DomainException):
+    """Excepción base para fallos al actualizar la información del perfil."""
+    pass
+```
+
+---
+
+## Paso 5: Crear los esquemas JSON:API
+
+**Archivo:** `src/app/presentation/api/v1/schemas/auth.py`
+
+FastAPI utiliza esquemas de Pydantic para validar los datos que entran en la petición HTTP y dar formato a las respuestas que salen hacia el cliente. En GEMA, seguimos la especificación estricta de JSON:API.
+
+Añade los esquemas de validación de entrada al final de `schemas/auth.py`:
+
+```python
+from pydantic import BaseModel, Field
+
+class UpdateProfileAttributes(BaseModel):
+    """Atributos de entrada requeridos para actualizar el email."""
+    email: str = Field(
+        ..., 
+        example="nuevo_correo@sigma.com", 
+        description="Dirección de correo electrónico del usuario"
+    )
+
+
+class UpdateProfileResource(BaseModel):
+    """Representación del recurso en la petición JSON:API."""
+    type: str = Field("users", description="El tipo de recurso debe ser 'users'")
+    attributes: UpdateProfileAttributes
+
+
+class UpdateProfileRequest(BaseModel):
+    """Documento raíz de la petición HTTP."""
+    data: UpdateProfileResource
+```
+
+<Callout type="info" title="Estructura JSON:API:">
+
+La especificación JSON:API exige que toda estructura de datos compleja viaje envuelta en un objeto raíz llamado `data`. Este objeto contiene obligatoriamente un campo `type` que define el recurso y una propiedad `attributes` con los datos reales del modelo. Las respuestas del perfil de usuario reutilizan el esquema `UserDocument` que ya está declarado en este mismo archivo.
+
+</Callout>
+
+---
+
+## Paso 6: Registrar el manejador de excepciones (Exception handler)
+
+**Archivo:** `src/app/presentation/exception_handlers.py`
+
+Para evitar que tu endpoint se ensucie con bloques `try/except` repetitivos, el proyecto cuenta con un controlador global de excepciones que intercepta los errores del dominio y los traduce de forma automática a respuestas de error estructuradas con formato JSON:API.
+
+Si en el **Paso 4** creaste una excepción nueva, debes mapearla en la función `domain_exception_handler` agregando una condición en el bloque condicional:
+
+```python
+elif isinstance(exc, ProfileUpdateException):
+    status_code = status.HTTP_422_UNPROCESSABLE_ENTITY
+    code = "ERR_PROFILE_UPDATE_FAILED"
+```
+
+El middleware capturará este error y devolverá una respuesta HTTP con el código configurado y la descripción exacta que definiste en la excepción.
+
+---
+
+## Paso 7: Crear el endpoint de la API
+
+**Archivo:** `src/app/presentation/api/v1/endpoints/auth.py`
+
+El endpoint es la puerta de acceso HTTP. Recibe la solicitud del cliente, extrae los parámetros, delega la ejecución al caso de uso e inyecta las dependencias necesarias mediante FastAPI.
+
+Añade la siguiente ruta en `endpoints/auth.py`:
+
+```python
+from fastapi import APIRouter, Depends, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from app.application.dtos import UpdateProfileRequest as UpdateProfileRequestDto
+from app.application.use_cases.update_profile import UpdateProfileUseCase
+from app.composition.container import get_update_profile_use_case
+from app.presentation.api.v1.schemas.auth import (
+    UpdateProfileRequest,
+    UserDocument,
+    UserResource,
+    UserAttributes,
+)
+
+# ... (El router y el HTTPBearer ya se encuentran declarados arriba en el archivo)
+
+@router.patch(
+    "/profile",
+    response_model=UserDocument,
+    status_code=status.HTTP_200_OK,
+    summary="Actualizar perfil de usuario",
+)
+async def update_profile(
+    request: UpdateProfileRequest,
+    token: HTTPAuthorizationCredentials = Depends(security),
+    use_case: UpdateProfileUseCase = Depends(get_update_profile_use_case),
+) -> UserDocument:
+    """Actualiza la dirección de correo electrónico del usuario autenticado en el sistema."""
+    # 1. Transformamos los datos del esquema Pydantic en nuestro DTO de aplicación
+    dto_req = UpdateProfileRequestDto(
+        email=request.data.attributes.email,
+    )
+    
+    # 2. Invocamos al caso de uso inyectado
+    user_resp = await use_case.execute(token.credentials, dto_req)
+    
+    # 3. Retornamos la respuesta estructurada siguiendo el formato JSON:API
+    return UserDocument(
+        data=UserResource(
+            id=user_resp.id,
+            attributes=UserAttributes(
+                email=user_resp.email,
+                is_active=user_resp.is_active,
+                created_at=user_resp.created_at,
+                updated_at=user_resp.updated_at,
+            ),
+        )
+    )
+```
+
+---
+
+## Paso 8: Registrar la fábrica en el contenedor
+
+**Archivo:** `src/app/composition/container.py`
+
+En la arquitectura hexagonal, la capa de presentación no debe instanciar ni acoplarse de forma directa a componentes físicos de infraestructura (como la base de datos de SQLAlchemy). El archivo `container.py` actúa como la **raíz de composición**, el único lugar donde se resuelven y asocian las dependencias del sistema.
+
+Abre `container.py` y registra el caso de uso importando la clase y creando su función de fábrica:
+
+```python
+from app.application.use_cases.update_profile import UpdateProfileUseCase
+
+# ... (Las demás fábricas de dependencias)
+
+async def get_update_profile_use_case(
+    uow: UnitOfWorkPort = Depends(get_uow),
+    token_service: TokenServicePort = Depends(get_token_service),
+) -> UpdateProfileUseCase:
+    """Fábrica de dependencias para resolver la instanciación de UpdateProfileUseCase."""
+    return UpdateProfileUseCase(uow, token_service)
+```
+
+FastAPI usará esta función de fábrica para resolver e inyectar el caso de uso en tu endpoint cuando llames a `Depends(get_update_profile_use_case)`.
+
+---
+
+## Paso 9: Registrar el router
+
+**Archivo:** `src/app/presentation/api/v1/router.py`
+
+Como en nuestro ejemplo agregamos el endpoint en `endpoints/auth.py`, y este router ya se encuentra registrado bajo el prefijo `/v1/auth`, **no necesitas añadir nada**.
+
+Si hubieras creado un archivo de endpoints completamente nuevo (por ejemplo, `endpoints/profile.py`), deberías registrarlo en `router.py`:
+
+```python
+from app.presentation.api.v1.endpoints.profile import router as profile_router
+
+v1_router.include_router(profile_router, prefix="/profile", tags=["profile"])
+```
+
+---
+
+## Verificación
+
+Una vez completados todos los pasos anteriores, puedes iniciar el servidor y verificar el comportamiento del endpoint mediante terminal ejecutando los siguientes pasos.
+
+### 1. Iniciar el servidor local
+```bash
+poetry run uvicorn src.app.main:app --reload
+```
+
+### 2. Iniciar sesión para obtener un token de acceso válido
+```bash
+ACCESS_TOKEN=$(curl -s -X POST http://localhost:8000/v1/auth/login \
+  -H "Content-Type: application/vnd.api+json" \
+  -d '{"data":{"type":"tokens","attributes":{"email":"dev@sigma.com","password":"ContrasenaSegura123!"}}}' \
+  | python -c "import sys, json; print(json.load(sys.stdin)['data']['attributes']['access_token'])")
+```
+
+### 3. Invocar al nuevo endpoint para actualizar tu perfil
+```bash
+curl -i -X PATCH http://localhost:8000/v1/auth/profile \
+  -H "Content-Type: application/vnd.api+json" \
+  -H "Accept: application/vnd.api+json" \
+  -H "Authorization: Bearer $ACCESS_TOKEN" \
+  -d '{"data":{"type":"users","attributes":{"email":"colaborador@sigma.com"}}}'
+```
+
+### Respuesta esperada (HTTP 200 OK)
+```json
+{
+  "data": {
+    "type": "users",
+    "id": "c88be2ef-a15d-4f10-9fb8-ff298ba5cb0a",
+    "attributes": {
+      "email": "colaborador@sigma.com",
+      "is_active": true,
+      "created_at": "2026-05-19T12:00:00Z",
+      "updated_at": "2026-05-19T16:15:00Z"
+    }
+  }
+}
+```
+
+---
+
+## Próximos pasos
+
+Una vez que compruebes que tu ruta funciona correctamente, te recomendamos escribir pruebas automatizadas para proteger el código de fallos futuros:
+
+- [Pruebas unitarias](../testing/unit-tests): para simular y validar las ramificaciones del caso de uso.
+- [Pruebas de integración](../testing/integration-tests): para verificar que la persistencia funcione correctamente contra la base de datos física de PostgreSQL.
