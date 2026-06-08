@@ -3,19 +3,16 @@ title: Guía para crear un endpoint
 description: Guía detallada para la creación y estructuración de endpoints siguiendo la arquitectura de GEMA Backend.
 ---
 
-# Guía para crear un endpoint en GEMA Backend
-
 Un endpoint en GEMA es una función de FastAPI que recibe un request HTTP, lo traduce a un DTO, se lo pasa a un Use Case y devuelve una respuesta JSON:API. Nada más.
 
 Puedes pensar en esto como un mesero: él no cocina. Recibe el pedido (request), lo anota (valida el token y los permisos), lo lleva a la cocina (el Use Case), espera el plato y lo trae a la mesa (response). Si el mesero se pone a cocinar, todo se desordena. Cada capa mantiene una responsabilidad delimitada para evitar el acoplamiento.
 
-
-> El acoplamiento (coupling) en ingeniería de software mide el grado de interdependencia que existe entre dos o más módulos, clases o componentes de un sistema.
+<Callout type="info">
+El acoplamiento (coupling) en ingeniería de software mide el grado de interdependencia que existe entre dos o más módulos, clases o componentes de un sistema.
+</Callout>
 
 
 ```python title="src/app/presentation/api/v1/endpoints/preferences.py"
-
-
 # GET /companies/{company_id}/me/preferences/
 
 @router.get("", response_model=PreferenceDocument)
@@ -78,7 +75,9 @@ La tabla existe en la base de datos (`database.dbml` la define con esta estructu
 | `GET` | `/v1/companies/{cid}/me/preferences` | Obtener preferencias del usuario actual | Bearer |
 | `PATCH` | `/v1/companies/{cid}/me/preferences` | Actualizar preferencias del usuario actual | Bearer |
 
-> En desarrollo de software, Bearer (literalmente «el portador») es un esquema de autenticación para peticiones HTTP, funciona bajo una regla simple: quien posee el token tiene el acceso, es similar a la tarjeta llave de un hotel. Al sensor de la puerta no le interesa saber quién eres ni cómo te llamas; si tienes la tarjeta en la mano (si eres el portador), la puerta se abre.
+<Callout type="info">
+En desarrollo de software, Bearer (literalmente «el portador») es un esquema de autenticación para peticiones HTTP, funciona bajo una regla simple: quien posee el token tiene el acceso, es similar a la tarjeta llave de un hotel. Al sensor de la puerta no le interesa saber quién eres ni cómo te llamas; si tienes la tarjeta en la mano (si eres el portador), la puerta se abre.
+</Callout>
 
 ---
 
@@ -157,17 +156,36 @@ sequenceDiagram
 
 ---
 
-### Capa 1 — Domain: `src/app/domain/`
+### Capa de Dominio
 
 Siempre se empieza por esta capa. El dominio no depende de nada externo. No hay SQLAlchemy, FastAPI ni Pydantic. Solo Python puro.
 
-Si el módulo es nuevo (preferences), hay que crear los siguientes archivos.
+<Files>
+  <Folder name="src/app/domain">
+    <File name="__init__.py" />
+  </Folder>
+</Files>
 
-> **Recordatorio:** cada nuevo módulo del dominio debe crear sus excepciones, value objects (si aplica) y entidad. No importa qué tan simple sea el recurso. El dominio es el núcleo: si no está bien definido a este nivel, el resto de capas arrastran el problema.
+Si el módulo es nuevo (preferences en este caso), hay que crear los siguientes archivos.
+
+<Callout type="info">
+    Cada nuevo módulo del dominio debe crear sus excepciones, value objects (si aplica) y entidad. No importa qué tan simple sea el recurso. El dominio es el núcleo: si no está bien definido a este nivel, el resto de capas arrastran el problema.
+</Callout>
 
 #### Excepciones específicas
 
 `src/app/domain/exceptions/preferences.py`:
+
+<Files>
+  <Folder name="src/app/domain/preferences">
+    <File name="__init__.py" />
+    <File name="enums.py" />
+    <File name="exceptions.py" />
+    <File name="ports.py" />
+    <File name="user_preference.py" />
+    <File name="events.py" />
+  </Folder>
+</Files>
 
 ```python title="src/app/domain/exceptions/preferences.py"
 from app.domain.exceptions.base import DomainException
@@ -188,6 +206,8 @@ class PreferenceThemeInvalidError(PreferenceException):
     pass
 ```
 
+[EXPLICACION CORRECTA DEL CODIGO]
+
 Ahora tenemos que re-exportar en `src/app/domain/exceptions/__init__.py`:
 
 ```python title="src/app/domain/exceptions/__init__.py"
@@ -206,24 +226,41 @@ __all__ = [
 ]
 ```
 
-> **Nota:** el patrón de nombramiento es `[Entidad][Problema]Error`, igual que en el resto del proyecto (`UserAlreadyExistsError`, `AssetCodeExistsError`, `LocationCircularReferenceError`). La excepción base del módulo (`PreferenceException`) permite capturar todas las excepciones de preferencias de una sola vez si hiciera falta. Toda excepción de dominio debe registrarse después en `presentation/exception_handlers/domain.py`. Si no, el cliente recibe un 500 genérico en vez del código HTTP correcto.
+[EXPLICACION CORRECTA DEL CODIGO]
+
+<Callout type="info">
+    El patrón de nombramiento es `[Entidad][Problema]Error`, igual que en el resto del proyecto (`UserAlreadyExistsError`, `AssetCodeExistsError`, `LocationCircularReferenceError`). La excepción base del módulo (`PreferenceException`) permite capturar todas las excepciones de preferencias de una sola vez si hiciera falta. Toda excepción de dominio debe registrarse después en `presentation/exception_handlers/domain.py`. Si no, el cliente recibe un 500 genérico en vez del código HTTP correcto.
+</Callout>
 
 #### Enum de dominio
 
 Los enums evitan strings mágicos. Si en el código aparecen `"oscuro"` y `"claro"` como literales repartidos por 5 archivos, un typo (`"oscuro "` con espacio) puede pasar desapercibido hasta producción. Con un enum, el compilador (mypy) y el runtime protegen contra valores inválidos.
 
-> **📖 5W1H: Enum de dominio**
->
-> | Pregunta | Respuesta |
-> |----------|-----------|
-> | **What** (¿Qué es?) | Una clase que hereda de `StrEnum` (Python 3.11+) y define un conjunto fijo de valores válidos. Cada miembro es un string, pero solo los definidos en la clase son válidos. |
-> | **Why** (¿Por qué usarlo?) | Centraliza los valores permitidos en un solo lugar, elimina strings mágicos, da autocompletado en el IDE, y mypy detecta si pasás un string cualquiera donde se espera un `Theme`. |
-> | **Who** (¿Quién lo define?) | La capa de **Domain**. No depende de nada externo. Solo usa `from enum import StrEnum` (stdlib). |
-> | **Where** (¿Dónde vive?) | En `src/app/domain/enums.py`, un archivo compartido por todo el dominio. No se crea un archivo por módulo — todos los enums del dominio van en el mismo archivo. |
-> | **When** (¿Cuándo crearlo?) | Cuando un campo de la entidad tiene un conjunto acotado de valores posibles: estados (`Active`, `Inactive`), tipos (`Admin`, `User`), categorías (`Asset`, `Location`), temas (`Dark`, `Light`). |
-> | **How** (¿Cómo se crea?) | `class Theme(StrEnum):` con atributos de clase en MAYÚSCULAS como convención. El valor es el string que se persiste en BD y viaja en la API. |
+<Callout type="info">
+**Explicación del enum de dominio**
+
+| Pregunta | Respuesta |
+|----------|-----------|
+| **What** (¿Qué es?) | Una clase que hereda de `StrEnum` (Python 3.11+) y define un conjunto fijo de valores válidos. Cada miembro es un string, pero solo los definidos en la clase son válidos. |
+| **Why** (¿Por qué usarlo?) | Centraliza los valores permitidos en un solo lugar, elimina strings mágicos, da autocompletado en el IDE, y mypy detecta si pasás un string cualquiera donde se espera un `Theme`. |
+| **Who** (¿Quién lo define?) | La capa de **Domain**. No depende de nada externo. Solo usa `from enum import StrEnum` (stdlib). |
+| **Where** (¿Dónde vive?) | En `src/app/domain/enums.py`, un archivo compartido por todo el dominio. No se crea un archivo por módulo — todos los enums del dominio van en el mismo archivo. |
+| **When** (¿Cuándo crearlo?) | Cuando un campo de la entidad tiene un conjunto acotado de valores posibles: estados (`Active`, `Inactive`), tipos (`Admin`, `User`), categorías (`Asset`, `Location`), temas (`Dark`, `Light`). |
+| **How** (¿Cómo se crea?) | `class Theme(StrEnum):` con atributos de clase en MAYÚSCULAS como convención. El valor es el string que se persiste en BD y viaja en la API. |
+</Callout>
 
 Para el campo `tema` de `UserPreference`, los valores son `"oscuro"` y `"claro"`:
+
+<Files>
+  <Folder name="src/app/domain">
+    <File name="__init__.py" />
+    <File name="enums.py" />
+    <File name="exceptions.py" />
+    <File name="ports.py" />
+    <File name="user_preference.py" />
+    <File name="events.py" />
+  </Folder>
+</Files>
 
 `src/app/domain/enums.py` (agregar al existente):
 
@@ -238,15 +275,23 @@ class Theme(StrEnum):
     SYSTEM = "sistema"
 ```
 
-> **¿Por qué `StrEnum` y no `Enum`?** Con `StrEnum` cada miembro *es* un string: `Theme.DARK == "oscuro"` da `True`. Con `Enum` clásico, tendrías que acceder con `.value` cada vez. La entidad, el repositorio y el schema pueden tratar `Theme` como un string directamente.
+[EXPLICACION CORRECTA DEL CODIGO]
 
-> **Validación automática:** cuando el Use Case hace `Theme(request.tema)`, si el string no coincide con ningún miembro, el constructor de `StrEnum` lanza `ValueError`. Esa excepción se captura en el Use Case y se convierte en `PreferenceThemeInvalidError`. No necesitas escribir una validación manual.
+<Callout type="info">
+**¿Por qué `StrEnum` y no `Enum`?** Con `StrEnum` cada miembro *es* un string: `Theme.DARK == "oscuro"` da `True`. Con `Enum` clásico, tendrías que acceder con `.value` cada vez. La entidad, el repositorio y el schema pueden tratar `Theme` como un string directamente.
+</Callout>
+
+<Callout type="info">
+**Validación automática:** cuando el Use Case hace `Theme(request.tema)`, si el string no coincide con ningún miembro, el constructor de `StrEnum` lanza `ValueError`. Esa excepción se captura en el Use Case y se convierte en `PreferenceThemeInvalidError`. No necesitas escribir una validación manual.
+</Callout>
 
 #### Value Objects
 
 En este caso no necesitamos crear un `PreferenceId`. La PK de la tabla es `usuario_id`, y `UserId` ya existe en `src/app/domain/value_objects/identifiers.py`. La entidad usará `UserId` directamente.
 
-> **⚠️ PK como `usuario_id` rompe la convención `id`:** todos los modelos del proyecto usan `id` como PK. `UserPreferenceModel` usa `usuario_id` porque es 1:1 con los usuarios. Esto obliga a sobrescribir `get_by_id` en el repositorio (el `SqlAlchemyRepository` base asume PK = `id`). También significa que el endpoint devuelve `"id": usuario_id` en lugar de un ID propio, que es correcto para JSON:API (el `id` del recurso es el identificador único, no necesariamente una columna llamada `id`). Si en el futuro preferences dejara de ser 1:1, habría que migrar a un `id` propio como PK.
+<Callout type="warn">
+    **PK como `usuario_id` rompe la convención `id`:** todos los modelos del proyecto usan `id` como PK. `UserPreferenceModel` usa `usuario_id` porque es 1:1 con los usuarios. Esto obliga a sobrescribir `get_by_id` en el repositorio (el `SqlAlchemyRepository` base asume PK = `id`). También significa que el endpoint devuelve `"id": usuario_id` en lugar de un ID propio, que es correcto para JSON:API (el `id` del recurso es el identificador único, no necesariamente una columna llamada `id`). Si en el futuro preferences dejara de ser 1:1, habría que migrar a un `id` propio como PK.
+</Callout>
 
 #### Entidad
 
@@ -292,15 +337,17 @@ class UserPreference:
             )
 ```
 
+[EXPLICACION CORRECTA DEL CODIGO]
+
 Re-exportar en `src/app/domain/entities/__init__.py`:
 
 ```python title="src/app/domain/entities/__init__.py"
 from app.domain.entities.preferences import UserPreference
 ```
 
-> **Clase pura de Python — qué significa exactamente:**
->
-> Una "clase pura de Python" usa exclusivamente la biblioteca estándar (`dataclasses`, `datetime`, `uuid`, `enum`, `typing`). No importa nada de terceros:
+<Callout type="info">
+**Clase pura de Python, qué significa exactamente:** Una "clase pura de Python" usa exclusivamente la biblioteca estándar (`dataclasses`, `datetime`, `uuid`, `enum`, `typing`). No importa nada de terceros:
+</Callout>
 
 | ✅ Permitido (stdlib) | ❌ Prohibido (externo) |
 |---|---|
@@ -309,11 +356,17 @@ from app.domain.entities.preferences import UserPreference
 | `from enum import StrEnum` | `from fastapi import Query` |
 | `import uuid` | `from structlog import get_logger` |
 
-> Esta clase no sabe si los datos vienen de PostgreSQL, de un archivo CSV o de una API. Solo sabe que sus campos tienen ciertos tipos y que sus métodos validan reglas del negocio. Es el contrato más puro del sistema.
+<Callout type="info">
+Esta clase no sabe si los datos vienen de PostgreSQL, de un archivo CSV o de una API. Solo sabe que sus campos tienen ciertos tipos y que sus métodos validan reglas del negocio. Es el contrato más puro del sistema.
+</Callout>
 
-> **Regla de oro**: Para mantener la lógica de negocio pura y desacoplada en la capa de Dominio, los desarrolladores deben evitar importar cualquier librería de terceros durante el modelado de entidades y reglas de negocio, asegurando así que el núcleo del sistema sea inmune a cambios tecnológicos, obsolescencias o migraciones de frameworks; esto se valida de forma práctica verificando que ningún módulo importado en el Dominio figure como dependencia externa en el archivo pyproject.toml.
+<Callout type="info">
+**Regla de oro**: Para mantener la lógica de negocio pura y desacoplada en la capa de Dominio, los desarrolladores deben evitar importar cualquier librería de terceros durante el modelado de entidades y reglas de negocio, asegurando así que el núcleo del sistema sea inmune a cambios tecnológicos, obsolescencias o migraciones de frameworks; esto se valida de forma práctica verificando que ningún módulo importado en el Dominio figure como dependencia externa en el archivo pyproject.toml.
+</Callout>
 
-> **📖 5W1H: Entidad anémica vs Entidad rica**
+<Callout type="info">
+**Entidad anémica vs Entidad rica**
+</Callout>
 
 | Dimensión | Entidad anémica | Entidad rica |
 |-----------|----------------|--------------|
@@ -324,17 +377,25 @@ from app.domain.entities.preferences import UserPreference
 | **Where** (dónde) | `domain/entities/` — mismo lugar que las ricas. | `domain/entities/` — mismo lugar que las anémicas. |
 | **How** (cómo) | `@dataclass` plano. Los casos de uso leen y asignan valores directamente. | Clase con `@classmethod` fábrica, métodos como `activate()`, `has_permission()`, `pull_events()`. La entidad controla su propio estado. |
 
-> **Regla práctica en GEMA**: las entidades nuevas empiezan con logica de negocio (rich entities) desde el primer día, con un método de fábrica `create()` y validación de invariantes en `__post_init__`— como `UserPreference` más arriba. En GEMA no hay entidades anémicas en producción. El `@dataclass` sin métodos solo sirve como boceto inicial mientras se define la estructura; antes del primer commit, la entidad debe tener sus invariantes protegidas. Cuando el use case necesite una validación nueva, no escribas un `if` en el use case: sube esa lógica a la entidad.
+<Callout type="info">
+**Regla práctica en GEMA**: las entidades nuevas empiezan con logica de negocio (rich entities) desde el primer día, con un método de fábrica `create()` y validación de invariantes en `__post_init__`— como `UserPreference` más arriba. En GEMA no hay entidades anémicas en producción. El `@dataclass` sin métodos solo sirve como boceto inicial mientras se define la estructura; antes del primer commit, la entidad debe tener sus invariantes protegidas. Cuando el use case necesite una validación nueva, no escribas un `if` en el use case: sube esa lógica a la entidad.
+</Callout>
 
-> Una invariante es una regla de negocio inmutable que siempre debe cumplirse para que un objeto del sistema sea válido
+<Callout type="info">
+Una invariante es una regla de negocio inmutable que siempre debe cumplirse para que un objeto del sistema sea válido
+</Callout>
 
 ---
 
-### Capa 2 — Application: `src/app/application/`
+### Capa de Aplicación
+
+`src/app/application/`
 
 En esta capa se define el contrato (DTOs + Puerto) y la orquestación (Use Cases). Sigue siendo código puro, sin SQLAlchemy ni FastAPI.
 
-> **Recordatorio:** los DTOs son clases de Python puras e inmutables. Los Puertos son interfaces (Protocols). Los Use Cases son clases que orquestan: reciben un DTO o parámetros, llaman al puerto, devuelven un DTO. Nunca reciben un schema de FastAPI ni devuelven un modelo de BD.
+<Callout type="info">
+**Recordatorio:** los DTOs son clases de Python puras e inmutables. Los Puertos son interfaces (Protocols). Los Use Cases son clases que orquestan: reciben un DTO o parámetros, llaman al puerto, devuelven un DTO. Nunca reciben un schema de FastAPI ni devuelven un modelo de BD.
+</Callout>
 
 #### DTOs
 
@@ -356,9 +417,15 @@ class UpdatePreferenceRequest:
     tema: str | None = None
 ```
 
-> **Clase pura de Python — concepto (otra vez, pero con DTOs):** `@dataclass(frozen=True)` es inmutable. No tiene métodos de framework. No serializa, no valida, no lanza excepciones automáticas. Solo transporta datos de un lado a otro. Viaja del endpoint al Use Case y del Use Case al endpoint.
+[EXPLICACION CORRECTA DEL CODIGO]
 
-> El DTO es la moneda que circula entre Presentation y Application. La entidad de dominio es la moneda que circula entre Application e Infrastructure (a través del Puerto). Son dos monedas distintas, para dos tramos distintos del viaje. Si mezclas los tramos —si el Use Case devuelve un modelo ORM o recibe un schema Pydantic— rompes el aislamiento de capas.
+<Callout type="info">
+**Clase pura de Python — concepto (otra vez, pero con DTOs):** `@dataclass(frozen=True)` es inmutable. No tiene métodos de framework. No serializa, no valida, no lanza excepciones automáticas. Solo transporta datos de un lado a otro. Viaja del endpoint al Use Case y del Use Case al endpoint.
+</Callout>
+
+<Callout type="info">
+El DTO es la moneda que circula entre Presentation y Application. La entidad de dominio es la moneda que circula entre Application e Infrastructure (a través del Puerto). Son dos monedas distintas, para dos tramos distintos del viaje. Si mezclas los tramos —si el Use Case devuelve un modelo ORM o recibe un schema Pydantic— rompes el aislamiento de capas.
+</Callout>
 
 ```mermaid
 flowchart TD
@@ -375,7 +442,9 @@ flowchart TD
     SchemaOut --> Res["HTTP Response"]
 ```
 
-> Los DTOs transportan representaciones serializables (`str`, `int`), no objetos de dominio. La conversión de `Theme` a `str` la hace el Use Case al construir el DTO de respuesta.
+<Callout type="info">
+Los DTOs transportan representaciones serializables (`str`, `int`), no objetos de dominio. La conversión de `Theme` a `str` la hace el Use Case al construir el DTO de respuesta.
+</Callout>
 
 #### Puerto de repositorio (Interface)
 
@@ -402,20 +471,28 @@ class PreferenceRepositoryPort(Protocol):
         ...
 ```
 
-> **📖 5W1H: Interface (Protocol) — concepto**
->
-> | Pregunta | Respuesta |
-> |----------|-----------|
-> | **What** (¿Qué es?) | Un `Protocol` de `typing` es un **contrato estructural**. Declara qué métodos debe tener una clase y con qué firmas, sin decir *cómo* funcionan. Es duck typing validado en tiempo de compilación (mypy). |
-> | **Why** (¿Por qué usarlo?) | Para **desacoplar** la definición del "qué hacer" (Application) de la implementación del "cómo hacerlo" (Infrastructure). Si mañana cambias PostgreSQL por MySQL, solo cambia Infrastructure. El Use Case ni se entera. |
-> | **Who** (¿Quién lo define? ¿Quién lo implementa?) | **Application** define el Protocol (el Puerto). **Infrastructure** implementa una clase concreta que cumple el contrato (el Adaptador). **Composition Root** conecta ambos en tiempo de ejecución. |
-> | **Where** (¿Dónde vive?) | Los Protocols están en `src/app/application/ports/`. Las implementaciones en `src/app/infrastructure/repositories/`. |
-> | **When** (¿Cuándo se crea?) | Cuando un Use Case necesita delegar una operación a Infrastructure (persistencia, hashing, envío de emails, etc.). Se diseña el Puerto **antes** de escribir la implementación concreta. |
-> | **How** (¿Cómo se escribe?) | `class MiPuerto(Protocol):` con métodos async, firmas tipadas y `...` en el cuerpo. El Use Case lo recibe en su `__init__`. Infrastructure implementa una clase con los mismos métodos. |
+[EXPLICACION CORRECTA DEL CODIGO]
 
-> **Diferencia clave con ABC:** `Protocol` usa **tipado estructural** (no necesitas heredar explícitamente). ABC usa **tipado nominal** (debes escribir `class X(AbstractBase)`). Protocol es más flexible: cualquier clase con los métodos correctos es válida, aunque no haya declarado `implements MiProtocol`.
+<Callout type="info">
+**Interface (Protocol) — concepto**
 
-> **Duck Typing** es un estilo de programación en Python donde el intérprete evalúa la validez de un objeto en tiempo de ejecución fijándose únicamente en si este tiene los métodos o atributos necesarios en lugar de validar su tipo o herencia explícita, permitiendo a los desarrolladores escribir código altamente flexible y desacoplado de jerarquías rígidas de clases.
+| Pregunta | Respuesta |
+|----------|-----------|
+| **What** (¿Qué es?) | Un `Protocol` de `typing` es un **contrato estructural**. Declara qué métodos debe tener una clase y con qué firmas, sin decir *cómo* funcionan. Es duck typing validado en tiempo de compilación (mypy). |
+| **Why** (¿Por qué usarlo?) | Para **desacoplar** la definición del "qué hacer" (Application) de la implementación del "cómo hacerlo" (Infrastructure). Si mañana cambias PostgreSQL por MySQL, solo cambia Infrastructure. El Use Case ni se entera. |
+| **Who** (¿Quién lo define? ¿Quién lo implementa?) | **Application** define el Protocol (el Puerto). **Infrastructure** implementa una clase concreta que cumple el contrato (el Adaptador). **Composition Root** conecta ambos en tiempo de ejecución. |
+| **Where** (¿Dónde vive?) | Los Protocols están en `src/app/application/ports/`. Las implementaciones en `src/app/infrastructure/repositories/`. |
+| **When** (¿Cuándo se crea?) | Cuando un Use Case necesita delegar una operación a Infrastructure (persistencia, hashing, envío de emails, etc.). Se diseña el Puerto **antes** de escribir la implementación concreta. |
+| **How** (¿Cómo se escribe?) | `class MiPuerto(Protocol):` con métodos async, firmas tipadas y `...` en el cuerpo. El Use Case lo recibe en su `__init__`. Infrastructure implementa una clase con los mismos métodos. |
+</Callout>
+
+<Callout type="info">
+**Diferencia clave con ABC:** `Protocol` usa **tipado estructural** (no necesitas heredar explícitamente). ABC usa **tipado nominal** (debes escribir `class X(AbstractBase)`). Protocol es más flexible: cualquier clase con los métodos correctos es válida, aunque no haya declarado `implements MiProtocol`.
+</Callout>
+
+<Callout type="info">
+**Duck Typing** es un estilo de programación en Python donde el intérprete evalúa la validez de un objeto en tiempo de ejecución fijándose únicamente en si este tiene los métodos o atributos necesarios en lugar de validar su tipo o herencia explícita, permitiendo a los desarrolladores escribir código altamente flexible y desacoplado de jerarquías rígidas de clases.
+</Callout>
 
 #### Registrar en UnitOfWorkPort
 
@@ -430,7 +507,11 @@ class UnitOfWorkPort(Protocol):
     preferences: PreferenceRepositoryPort
 ```
 
-> **Nota sobre el UoW:** El UnitOfWork maneja el ciclo de vida de la transacción: `__aenter__` abre la sesión, `commit()` persiste los cambios y publica eventos, `__aexit__` solo libera la sesión (no hace auto-commit). Los use cases de escritura deben llamar a `commit()` explícitamente. Los de lectura usan `async with self.uow` solo para abrir una sesión de lectura.
+[EXPLICACION CORRECTA DEL CODIGO]
+
+<Callout type="info">
+**Nota sobre el UoW:** El UnitOfWork maneja el ciclo de vida de la transacción: `__aenter__` abre la sesión, `commit()` persiste los cambios y publica eventos, `__aexit__` solo libera la sesión (no hace auto-commit). Los use cases de escritura deben llamar a `commit()` explícitamente. Los de lectura usan `async with self.uow` solo para abrir una sesión de lectura.
+</Callout>
 
 #### Use Cases
 
@@ -472,7 +553,11 @@ class GetUserPreferencesUseCase:
             )
 ```
 
-> **Para lecturas simples**: se pasan `company_id_str` y `user_id_str` como parámetros directos. Para casos con cuerpo (PATCH), usamos un DTO de entrada. Convención: si hay más de 2 parámetros, usa DTO siempre.
+[EXPLICACION CORRECTA DEL CODIGO]
+
+<Callout type="info">
+**Para lecturas simples**: se pasan `company_id_str` y `user_id_str` como parámetros directos. Para casos con cuerpo (PATCH), usamos un DTO de entrada. Convención: si hay más de 2 parámetros, usa DTO siempre.
+</Callout>
 
 `src/app/application/use_cases/preferences/update_user_preferences.py`:
 
@@ -535,7 +620,11 @@ class UpdateUserPreferencesUseCase:
             )
 ```
 
-> **Recordatorio:** el Use Case nunca devuelve la entidad directamente. Siempre devuelve un DTO. Si devolvés la entidad, el endpoint podría modificarla directamente, rompiendo el encapsulamiento. El Use Case es el orquestador: recibe un DTO plano o parámetros, llama al Puerto (que delega a Infrastructure), aplica reglas de dominio, y devuelve otro DTO plano. La cadena de delegación completa es: Presentation delega en Application, Application delega en Infrastructure a través del Puerto, pero Application mantiene el control de la orquestación.
+[EXPLICACION CORRECTA DEL CODIGO]
+
+<Callout type="info">
+El Use Case nunca devuelve la entidad directamente. Siempre devuelve un DTO. Si devolvés la entidad, el endpoint podría modificarla directamente, rompiendo el encapsulamiento. El Use Case es el orquestador: recibe un DTO plano o parámetros, llama al Puerto (que delega a Infrastructure), aplica reglas de dominio, y devuelve otro DTO plano. La cadena de delegación completa es: Presentation delega en Application, Application delega en Infrastructure a través del Puerto, pero Application mantiene el control de la orquestación.
+</Callout>
 
 Exportar en `src/app/application/use_cases/preferences/__init__.py`:
 
@@ -549,9 +638,13 @@ __all__ = [
 ]
 ```
 
+[EXPLICACION CORRECTA DEL CODIGO]
+
 ---
 
-### Capa 3 — Infrastructure: `src/app/infrastructure/`
+### Capa de infraestructura
+
+`src/app/infrastructure/`
 
 En esta capa se materializa el puerto contra SQLAlchemy. Si el Puerto es el contrato (la interfaz que define qué hacer), Infrastructure es la implementación concreta (cómo hacerlo). Este es el único lugar que sabe que la BD es PostgreSQL.
 
@@ -580,13 +673,19 @@ class UserPreferenceModel(TenantMixin, TimestampMixin, Base):
     tema: Mapped[str] = mapped_column(String(20), nullable=False, default="oscuro")
 ```
 
-> Notá que **hereda de `TenantMixin`**, igual que todos los modelos multi-tenant del proyecto (`UserModel`, `AssetModel`, `LocationModel`, etc.). `TenantMixin` provee el campo `empresa_id` automáticamente, con su ForeignKey e índice. Por eso no lo declaramos en el cuerpo de la clase.
+[EXPLICACION CORRECTA DEL CODIGO]
+
+<Callout type="info">
+Notá que **hereda de `TenantMixin`**, igual que todos los modelos multi-tenant del proyecto (`UserModel`, `AssetModel`, `LocationModel`, etc.). `TenantMixin` provee el campo `empresa_id` automáticamente, con su ForeignKey e índice. Por eso no lo declaramos en el cuerpo de la clase.
+</Callout>
 
 Re-exportar en `src/app/infrastructure/db/models/__init__.py`:
 
 ```python title="src/app/infrastructure/db/models/__init__.py"
 from app.infrastructure.db.models.preferences import UserPreferenceModel
 ```
+
+[EXPLICACION CORRECTA DEL CODIGO]
 
 #### Repositorio concreto
 
@@ -656,23 +755,27 @@ class SqlAlchemyPreferenceRepository(
         return self._to_entity(model)
 ```
 
+[EXPLICACION CORRECTA DEL CODIGO]
+
 El repositorio concreto implementa `PreferenceRepositoryPort` (el contrato). Hace dos cosas: traduce de modelo ORM a entidad de dominio (`_to_entity`) y de entidad a modelo ORM (`_to_model`). El Use Case nunca ve el modelo ORM. Solo ve la entidad. Infrastructure es el puente entre ambos mundos.
 
 También sobrescribe `get_by_id` porque `UserPreferenceModel` tiene `usuario_id` como PK, no `id`. El `SqlAlchemyRepository` base asume que la PK se llama `id`, así que hay que adaptarlo.
 
-> **📖 5W1H: Mapping ORM ↔ Entidad de dominio**
->
-> **¿Qué?** Es la traducción explícita y bidireccional entre dos representaciones del mismo dato: el modelo ORM (una clase de SQLAlchemy atada a la tabla PostgreSQL) y la entidad de dominio (una clase pura de Python sin rastro de infraestructura).
->
-> **¿Por qué?** Para mantener el aislamiento de capas. La entidad de dominio no debe importar SQLAlchemy, y el modelo ORM no debe salir de Infrastructure. Si el Use Case recibiera un modelo ORM, quedaría acoplado a la base de datos. El mapping es el puente que evita ese acoplamiento.
->
-> **¿Quién?** La capa Infrastructure, específicamente el repositorio concreto (`SqlAlchemyPreferenceRepository`). Es el único lugar del sistema que conoce ambos mundos.
->
-> **¿Cuándo?** En cada operación de persistencia: escritura (`_to_model`: entity → model) cuando el Use Case llama a `save()`, y lectura (`_to_entity`: model → entity) cuando ejecuta `get_by_user()`.
->
-> **¿Dónde?** En los métodos `_to_model()` y `_to_entity()` de cada repositorio, dentro de `src/app/infrastructure/repositories/`.
->
-> **¿Cómo?** Mapeo explícito, campo por campo, sin atajos ni conversión automática. `_to_entity` toma un modelo y construye una entidad con sus Value Objects (`UserId`, `CompanyId`, `Theme`). `_to_model` hace el camino inverso. Nunca hay "magia". Esto hace que el código sea rastreable, testeable y fácil de modificar cuando cambia la base de datos o el dominio.
+<Callout type="info">
+**Mapping ORM ↔ Entidad de dominio**
+
+**¿Qué?** Es la traducción explícita y bidireccional entre dos representaciones del mismo dato: el modelo ORM (una clase de SQLAlchemy atada a la tabla PostgreSQL) y la entidad de dominio (una clase pura de Python sin rastro de infraestructura).
+
+**¿Por qué?** Para mantener el aislamiento de capas. La entidad de dominio no debe importar SQLAlchemy, y el modelo ORM no debe salir de Infrastructure. Si el Use Case recibiera un modelo ORM, quedaría acoplado a la base de datos. El mapping es el puente que evita ese acoplamiento.
+
+**¿Quién?** La capa Infrastructure, específicamente el repositorio concreto (`SqlAlchemyPreferenceRepository`). Es el único lugar del sistema que conoce ambos mundos.
+
+**¿Cuándo?** En cada operación de persistencia: escritura (`_to_model`: entity → model) cuando el Use Case llama a `save()`, y lectura (`_to_entity`: model → entity) cuando ejecuta `get_by_user()`.
+
+**¿Dónde?** En los métodos `_to_model()` y `_to_entity()` de cada repositorio, dentro de `src/app/infrastructure/repositories/`.
+
+**¿Cómo?** Mapeo explícito, campo por campo, sin atajos ni conversión automática. `_to_entity` toma un modelo y construye una entidad con sus Value Objects (`UserId`, `CompanyId`, `Theme`). `_to_model` hace el camino inverso. Nunca hay "magia". Esto hace que el código sea rastreable, testeable y fácil de modificar cuando cambia la base de datos o el dominio.
+</Callout>
 
 #### Registrar en el UnitOfWork
 
@@ -700,7 +803,9 @@ poetry run alembic revision --autogenerate -m "create user preferences table"
 poetry run alembic upgrade head
 ```
 
-> **Nota:** GEMA usa Alembic en modo async (con `AsyncEngine`). Asegurate de que tu `alembic/env.py` esté configurado para usar el `AsyncEngine` del proyecto (ver `src/app/infrastructure/db/session.py`). Sin esta configuración, `--autogenerate` no detectará los modelos correctamente.
+<Callout type="info">
+**Nota:** GEMA usa Alembic en modo async (con `AsyncEngine`). Asegurate de que tu `alembic/env.py` esté configurado para usar el `AsyncEngine` del proyecto (ver `src/app/infrastructure/db/session.py`). Sin esta configuración, `--autogenerate` no detectará los modelos correctamente.
+</Callout>
 
 ---
 
@@ -749,9 +854,13 @@ class UpdatePreferenceRequest(BaseModel):
     data: UpdatePreferenceResource
 ```
 
-> **Recordatorio:** los Schemas siempre tienen estructura JSON:API: `{ data: { type, id, attributes: {...} } }`. Los DTOs son planos: `{ campo1, campo2 }`. No los confundas. El Schema es la vista que el cliente HTTP tiene del recurso. El DTO es la vista que la Application tiene del mismo recurso. Son dos perspectivas distintas del mismo dato, y la traducción entre ambas es responsabilidad exclusiva del endpoint.
->
-> Notá que `UpdatePreferenceResource` incluye `id`, como exige la especificación JSON:API para actualizaciones de recursos. Aunque el servidor pueda deducir el `id` del token de autenticación, el estándar requiere que el cliente lo envíe explícitamente.
+[EXPLICACION CORRECTA DEL CODIGO]
+
+<Callout type="info">
+**Recordatorio:** los Schemas siempre tienen estructura JSON:API: `{ data: { type, id, attributes: {...} } }`. Los DTOs son planos: `{ campo1, campo2 }`. No los confundas. El Schema es la vista que el cliente HTTP tiene del recurso. El DTO es la vista que la Application tiene del mismo recurso. Son dos perspectivas distintas del mismo dato, y la traducción entre ambas es responsabilidad exclusiva del endpoint.
+
+Notá que `UpdatePreferenceResource` incluye `id`, como exige la especificación JSON:API para actualizaciones de recursos. Aunque el servidor pueda deducir el `id` del token de autenticación, el estándar requiere que el cliente lo envíe explícitamente.
+</Callout>
 
 #### Endpoint
 
@@ -783,7 +892,6 @@ from app.presentation.api.v1.schemas.preferences import (
 )
 
 router = APIRouter()
-
 
 # GET /companies/{company_id}/me/preferences
 @router.get(
@@ -837,9 +945,13 @@ async def update_preferences(
     )
 ```
 
+[EXPLICACION CORRECTA DEL CODIGO]
+
 El endpoint recibe el request HTTP (qué), lo valida contra el usuario autenticado (quién) en el contexto de la empresa del path (dónde), en el momento de la llamada (cuándo), para obtener o modificar las preferencias visuales (por qué), y lo hace traduciendo el schema a DTO, llamando al Use Case, y devolviendo un documento JSON:API (cómo).
 
-> **⚠️ Validación multi-tenant:** en este flujo no se compara el `company_id` del path contra `current_user.empresa_id` porque el recurso preferences es del usuario autenticado y el repositorio filtra por ambos (`usuario_id` + `empresa_id`). Si el usuario pasa un `company_id` de otra empresa, la query devuelve `None` y el Use Case lanza 404. Para recursos donde el usuario pueda actuar en nombre de otras empresas, validá explícitamente: `if company_id != current_user.empresa_id: raise ForbiddenError`. No hacerlo es una fuga multi-tenant.
+<Callout type="warn">
+**Validación multi-tenant:** en este flujo no se compara el `company_id` del path contra `current_user.empresa_id` porque el recurso preferences es del usuario autenticado y el repositorio filtra por ambos (`usuario_id` + `empresa_id`). Si el usuario pasa un `company_id` de otra empresa, la query devuelve `None` y el Use Case lanza 404. Para recursos donde el usuario pueda actuar en nombre de otras empresas, validá explícitamente: `if company_id != current_user.empresa_id: raise ForbiddenError`. No hacerlo es una fuga multi-tenant.
+</Callout>
 
 #### Registrar el router
 
@@ -853,8 +965,9 @@ v1_router.include_router(
     prefix="/companies/{company_id}/me/preferences",
     tags=["preferences"],
 )
-
 ```
+
+[EXPLICACION CORRECTA DEL CODIGO]
 
 #### Mapear excepciones
 
@@ -880,9 +993,13 @@ _EXCEPTION_MAP: dict[type[DomainException], tuple[int, str]] = {
 }
 ```
 
+[EXPLICACION CORRECTA DEL CODIGO]
+
 ---
 
-### Capa 5 — Composition: `src/app/composition/container/`
+### Capa de Composición
+
+`src/app/composition/container/`
 
 Es el Composition Root: solo cablea dependencias. No hay lógica de negocio en esta capa. Es el pegamento que une las capas.
 
@@ -913,6 +1030,8 @@ async def get_update_preferences_use_case(
     return UpdateUserPreferencesUseCase(uow)
 ```
 
+[EXPLICACION CORRECTA DEL CODIGO]
+
 Exportar en `src/app/composition/container/__init__.py`:
 
 ```python title="src/app/composition/container/__init__.py"
@@ -931,36 +1050,55 @@ __all__ = [
 ]
 ```
 
-> **Nota sobre la convención de nombres:** en GEMA, las fábricas de use cases de **lectura** (get por ID) siguen el prefijo `provide_*` (ej: `provide_user_preferences_use_case`). Las de **escritura** (create, update, delete) usan `get_*`. Esto permite distinguir visualmente el tipo de operación en los imports del endpoint.
+[EXPLICACION CORRECTA DEL CODIGO]
 
-> **📖 5W1H: Composition Root**
->
-> | Pregunta | Respuesta |
-> |----------|-----------|
-> | **What** (¿Qué es?) | La única zona del sistema donde se instancian y cablean dependencias. No tiene lógica de negocio ni expone rutas HTTP. Solo contiene fábricas que reciben dependencias vía `Depends()` y devuelven instancias configuradas. |
-> | **Why** (¿Por qué existe?) | Por el Principio de Inversión de Dependencias (DIP). Las capas internas (Domain, Application) definen *qué* necesitan (interfaces/Ports), pero no deben saber *quién* las implementa. El Composition Root es el único lugar que conoce todas las implementaciones concretas y las inyecta hacia adentro. |
-> | **Who** (¿Quién lo usa?) | FastAPI (a través de `Depends()`) lo consume para resolver dependencias en los endpoints. Los desarrolladores lo editan cuando agregan un módulo nuevo. Los tests lo evitan: en tests unitarios se instancian los Use Cases directamente con mocks, sin pasar por el Composition Root. |
-> | **When** (¿Cuándo se ejecuta?) | En tiempo de request, no al arrancar la aplicación. FastAPI ejecuta la fábrica cada vez que un endpoint declara `Depends(nombre_de_la_fabrica)`. La primera vez que se necesita una dependencia, se ejecuta su fábrica. FastAPI cachea el resultado dentro del mismo request. |
-> | **Where** (¿Dónde vive?) | En `src/app/composition/container/`, organizado en un archivo por módulo de dominio: `common.py` (fábricas compartidas), `auth.py`, `company.py`, `role.py`, `asset.py`, `location.py`, `preferences.py`. |
-> | **How** (¿Cómo funciona?) | Cada fábrica declara sus dependencias como parámetros con `Depends()`, declara el tipo de retorno como el Use Case concreto, y en el cuerpo solo instancia el Use Case con los parámetros recibidos. No hay `if`, `for`, `try/except` ni lógica de negocio en el cuerpo. |
+<Callout type="info">
+**Nota sobre la convención de nombres:** en GEMA, las fábricas de use cases de **lectura** (get por ID) siguen el prefijo `provide_*` (ej: `provide_user_preferences_use_case`). Las de **escritura** (create, update, delete) usan `get_*`. Esto permite distinguir visualmente el tipo de operación en los imports del endpoint.
+</Callout>
+
+<Callout type="info">
+**Composition Root**
+
+| Pregunta | Respuesta |
+|----------|-----------|
+| **What** (¿Qué es?) | La única zona del sistema donde se instancian y cablean dependencias. No tiene lógica de negocio ni expone rutas HTTP. Solo contiene fábricas que reciben dependencias vía `Depends()` y devuelven instancias configuradas. |
+| **Why** (¿Por qué existe?) | Por el Principio de Inversión de Dependencias (DIP). Las capas internas (Domain, Application) definen *qué* necesitan (interfaces/Ports), pero no deben saber *quién* las implementa. El Composition Root es el único lugar que conoce todas las implementaciones concretas y las inyecta hacia adentro. |
+| **Who** (¿Quién lo usa?) | FastAPI (a través de `Depends()`) lo consume para resolver dependencias en los endpoints. Los desarrolladores lo editan cuando agregan un módulo nuevo. Los tests lo evitan: en tests unitarios se instancian los Use Cases directamente con mocks, sin pasar por el Composition Root. |
+| **When** (¿Cuándo se ejecuta?) | En tiempo de request, no al arrancar la aplicación. FastAPI ejecuta la fábrica cada vez que un endpoint declara `Depends(nombre_de_la_fabrica)`. La primera vez que se necesita una dependencia, se ejecuta su fábrica. FastAPI cachea el resultado dentro del mismo request. |
+| **Where** (¿Dónde vive?) | En `src/app/composition/container/`, organizado en un archivo por módulo de dominio: `common.py` (fábricas compartidas), `auth.py`, `company.py`, `role.py`, `asset.py`, `location.py`, `preferences.py`. |
+| **How** (¿Cómo funciona?) | Cada fábrica declara sus dependencias como parámetros con `Depends()`, declara el tipo de retorno como el Use Case concreto, y en el cuerpo solo instancia el Use Case con los parámetros recibidos. No hay `if`, `for`, `try/except` ni lógica de negocio en el cuerpo. |
+</Callout>
 
 
-> El cableado completo para este módulo es:
->
-> ```
-> Endpoint
->   └─ Depends(provide_user_preferences_use_case)     ← Composition
->        └─ Depends(get_uow)                           ← Composition/common.py
->             └─ SqlAlchemyUnitOfWork(                  ← Infrastructure
->                  event_bus=LoggingEventBus()
->                )
->                  └─ .preferences = SqlAlchemyPreferenceRepository(...)  ← Infrastructure
->                       └─ implements PreferenceRepositoryPort            ← Application/Ports
-> ```
+<Callout type="info">
+El cableado completo para este módulo es:
 
-> **¿Qué NO va en Composition?** Nada de lógica de negocio, nada de enrutado, nada de instanciación de dependencias fuera de las fábricas. Si ves un `if` o un `for` en una fábrica de Composition, está en el lugar equivocado. Tampoco se instancian repositorios fuera del UoW — el Use Case nunca hace `SqlAlchemyPreferenceRepository(session)`.
+```
+sequenceDiagram
+    autonumber
+    participant E as Endpoint
+    participant CR as Composition (Fábricas)
+    participant UOW as Unit of Work (Infrastructure)
+    participant Repo as Repositorio (Infrastructure)
 
-> **⚠️ Nota sobre `_to_model`:** el método `_to_model` **no mapea** `created_at` ni `updated_at`. La entidad los tiene como `None` por defecto (recién creada), y el modelo ORM hereda de `TimestampMixin`, que los asigna automáticamente al insertar. Si mapearas `None` explícitamente, pisarías el valor por defecto de la BD y obtendrías un error NOT NULL. El camino inverso (`_to_entity`) sí los lee porque la BD siempre los devuelve con valor. Este patrón es el mismo que usa `SqlAlchemyAssetRepository` en el proyecto real.
+    E->>CR: Depends(provide_user_preferences_use_case)
+    CR->>CR: Depends(get_uow)
+    CR->>UOW: Instancia SqlAlchemyUnitOfWork
+    Note over UOW: UOW recibe LoggingEventBus()
+    UOW->>Repo: Instancia SqlAlchemyPreferenceRepository(session)
+    UOW-->>CR: Retorna uow
+    CR->>CR: Instancia Use Case con uow
+    CR-->>E: Retorna GetUserPreferencesUseCase
+```
+</Callout>
+
+<Callout type="info">
+**¿Qué NO va en Composition?** Nada de lógica de negocio, nada de enrutado, nada de instanciación de dependencias fuera de las fábricas. Si ves un `if` o un `for` en una fábrica de Composition, está en el lugar equivocado. Tampoco se instancian repositorios fuera del UoW — el Use Case nunca hace `SqlAlchemyPreferenceRepository(session)`.
+</Callout>
+
+<Callout type="warn">
+**⚠️ Nota sobre `_to_model`:** el método `_to_model` **no mapea** `created_at` ni `updated_at`. La entidad los tiene como `None` por defecto (recién creada), y el modelo ORM hereda de `TimestampMixin`, que los asigna automáticamente al insertar. Si mapearas `None` explícitamente, pisarías el valor por defecto de la BD y obtendrías un error NOT NULL. El camino inverso (`_to_entity`) sí los lee porque la BD siempre los devuelve con valor. Este patrón es el mismo que usa `SqlAlchemyAssetRepository` en el proyecto real.
+</Callout>
 
 ---
 
