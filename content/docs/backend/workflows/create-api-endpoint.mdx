@@ -18,7 +18,7 @@ El acoplamiento (coupling) en ingeniería de software mide el grado de interdepe
 @router.get("", response_model=PreferenceDocument)
 async def get_preferences(
     company_id: str,
-    current_user: Any = Depends(get_current_active_user),
+    current_user: UserResponse = Depends(require_permission(PermissionModule.PREFERENCES, "view")),
     use_case: GetUserPreferencesUseCase = Depends(provide_user_preferences_use_case),
 ) -> PreferenceDocument:
     res = await use_case.execute(company_id, current_user.id)
@@ -51,7 +51,7 @@ Para toda esta guía vamos a usar el recurso **preferences** (tabla `preferencia
 
 - Es una relación **1:1 con el usuario** — no tiene ID propio, usa `usuario_id` como PK.
 - Solo tiene **GET** (leer) y **PATCH** (actualizar). No hay POST ni DELETE.
-- El usuario autenticado es **siempre el dueño** — no necesita permiso RBAC específico.
+- El endpoint usa **RBAC completo** con `require_permission(PermissionModule.PREFERENCES, "view"/"edit")`, igual que el resto de módulos del sistema.
 - El endpoint es un **singleton** — no recibe `{id}` en la ruta.
 
 ### Schema de la tabla
@@ -177,13 +177,15 @@ Si el módulo es nuevo (preferences en este caso), hay que crear los siguientes 
 `src/app/domain/exceptions/preferences.py`:
 
 <Files>
-  <Folder name="src/app/domain/preferences">
+  <Folder name="src/app/domain">
     <File name="__init__.py" />
-    <File name="enums.py" />
-    <File name="exceptions.py" />
-    <File name="ports.py" />
-    <File name="user_preference.py" />
-    <File name="events.py" />
+    <Folder name="entities">
+      <File name="__init__.py" />
+      <File name="preferences.py" />
+    </Folder>
+    <Folder name="exceptions">
+      <File name="preferences.py" />
+    </Folder>
   </Folder>
 </Files>
 
@@ -206,7 +208,7 @@ class PreferenceThemeInvalidError(PreferenceException):
     pass
 ```
 
-[EXPLICACION CORRECTA DEL CODIGO]
+Cada excepción vive en su propio archivo dentro del paquete `exceptions/`, organizado por módulo de dominio. `PreferenceException` es la clase base del módulo, y las excepciones específicas heredan de ella. Esto permite capturar todas las excepciones de preferencias con un solo `except PreferenceException`.
 
 Ahora tenemos que re-exportar en `src/app/domain/exceptions/__init__.py`:
 
@@ -226,7 +228,7 @@ __all__ = [
 ]
 ```
 
-[EXPLICACION CORRECTA DEL CODIGO]
+El `__init__.py` re-exporta las excepciones del módulo para que los use cases puedan importarlas directamente desde `app.domain.exceptions` sin conocer la estructura interna del paquete. El `__all__` explicito ayuda a mypy y a los IDE con el autocompletado.
 
 <Callout type="info">
     El patrón de nombramiento es `[Entidad][Problema]Error`, igual que en el resto del proyecto (`UserAlreadyExistsError`, `AssetCodeExistsError`, `LocationCircularReferenceError`). La excepción base del módulo (`PreferenceException`) permite capturar todas las excepciones de preferencias de una sola vez si hiciera falta. Toda excepción de dominio debe registrarse después en `presentation/exception_handlers/domain.py`. Si no, el cliente recibe un 500 genérico en vez del código HTTP correcto.
@@ -255,10 +257,9 @@ Para el campo `tema` de `UserPreference`, los valores son `"oscuro"` y `"claro"`
   <Folder name="src/app/domain">
     <File name="__init__.py" />
     <File name="enums.py" />
-    <File name="exceptions.py" />
-    <File name="ports.py" />
-    <File name="user_preference.py" />
-    <File name="events.py" />
+    <Folder name="exceptions">
+      <File name="preferences.py" />
+    </Folder>
   </Folder>
 </Files>
 
@@ -275,14 +276,14 @@ class Theme(StrEnum):
     SYSTEM = "sistema"
 ```
 
-[EXPLICACION CORRECTA DEL CODIGO]
+`Theme` es un `StrEnum` con tres valores: `DARK`, `LIGHT` y `SYSTEM`. Al heredar de `StrEnum`, cada miembro es directamente comparable con un string: `Theme.DARK == "oscuro"` es `True`. La entidad y los schemas pueden tratar `Theme` como un string sin acceder a `.value`.
 
 <Callout type="info">
 **¿Por qué `StrEnum` y no `Enum`?** Con `StrEnum` cada miembro *es* un string: `Theme.DARK == "oscuro"` da `True`. Con `Enum` clásico, tendrías que acceder con `.value` cada vez. La entidad, el repositorio y el schema pueden tratar `Theme` como un string directamente.
 </Callout>
 
 <Callout type="info">
-**Validación automática:** cuando el Use Case hace `Theme(request.tema)`, si el string no coincide con ningún miembro, el constructor de `StrEnum` lanza `ValueError`. Esa excepción se captura en el Use Case y se convierte en `PreferenceThemeInvalidError`. No necesitas escribir una validación manual.
+**Validación en la entidad (rica):** el Use Case llama a `pref.change_theme(request.tema)`. El método de la entidad intenta construir `Theme(nuevo_tema)`. Si el string no coincide con ningún miembro, el constructor de `StrEnum` lanza `ValueError`, que la entidad convierte en `PreferenceThemeInvalidError`. La validación ocurre en el dominio, no en el Use Case. El Use Case nunca ve `Theme` ni hace `try/except` de validación.
 </Callout>
 
 #### Value Objects
@@ -290,7 +291,7 @@ class Theme(StrEnum):
 En este caso no necesitamos crear un `PreferenceId`. La PK de la tabla es `usuario_id`, y `UserId` ya existe en `src/app/domain/value_objects/identifiers.py`. La entidad usará `UserId` directamente.
 
 <Callout type="warn">
-    **PK como `usuario_id` rompe la convención `id`:** todos los modelos del proyecto usan `id` como PK. `UserPreferenceModel` usa `usuario_id` porque es 1:1 con los usuarios. Esto obliga a sobrescribir `get_by_id` en el repositorio (el `SqlAlchemyRepository` base asume PK = `id`). También significa que el endpoint devuelve `"id": usuario_id` en lugar de un ID propio, que es correcto para JSON:API (el `id` del recurso es el identificador único, no necesariamente una columna llamada `id`). Si en el futuro preferences dejara de ser 1:1, habría que migrar a un `id` propio como PK.
+    **PK como `usuario_id` rompe la convención `id`:** todos los modelos del proyecto usan `id` como PK. `UserPreferenceModel` usa `usuario_id` porque es 1:1 con los usuarios. El `SqlAlchemyRepository` base ahora tiene `pk_column: str = "id"` como atributo de clase, y el repositorio de preferencias solo necesita declarar `pk_column = "usuario_id"` para heredar `get_by_id` correctamente. No hace falta sobrescribir el método. El endpoint devuelve `"id": usuario_id` en lugar de un ID propio, que es correcto para JSON:API (el `id` del recurso es el identificador único, no necesariamente una columna llamada `id`). Si en el futuro preferences dejara de ser 1:1, habría que migrar a un `id` propio como PK.
 </Callout>
 
 #### Entidad
@@ -331,13 +332,25 @@ class UserPreference:
         )
 
     def __post_init__(self) -> None:
+        """Valida invariantes después de la inicialización."""
         if self.tema is None:
             raise PreferenceThemeInvalidError(
                 "El tema visual no puede estar vacío."
             )
+
+    def change_theme(self, nuevo_tema: str) -> None:
+        """Cambia el tema visual. Acepta str para que la validación sea en dominio."""
+        try:
+            tema_validado = Theme(nuevo_tema)
+        except ValueError:
+            raise PreferenceThemeInvalidError(
+                f"El tema '{nuevo_tema}' no es válido. "
+                f"Valores permitidos: {', '.join(t.value for t in Theme)}."
+            ) from None
+        self.tema = tema_validado
 ```
 
-[EXPLICACION CORRECTA DEL CODIGO]
+`UserPreference` es una entidad rica: tiene un método fábrica `create()`, validación de invariantes en `__post_init__` y un método de cambio `change_theme()` que valida el tema en el dominio. El Use Case no muta campos directamente, sino que llama a `pref.change_theme(request.tema)`. La entidad controla su propio estado.
 
 Re-exportar en `src/app/domain/entities/__init__.py`:
 
@@ -378,7 +391,7 @@ Esta clase no sabe si los datos vienen de PostgreSQL, de un archivo CSV o de una
 | **How** (cómo) | `@dataclass` plano. Los casos de uso leen y asignan valores directamente. | Clase con `@classmethod` fábrica, métodos como `activate()`, `has_permission()`, `pull_events()`. La entidad controla su propio estado. |
 
 <Callout type="info">
-**Regla práctica en GEMA**: las entidades nuevas empiezan con logica de negocio (rich entities) desde el primer día, con un método de fábrica `create()` y validación de invariantes en `__post_init__`— como `UserPreference` más arriba. En GEMA no hay entidades anémicas en producción. El `@dataclass` sin métodos solo sirve como boceto inicial mientras se define la estructura; antes del primer commit, la entidad debe tener sus invariantes protegidas. Cuando el use case necesite una validación nueva, no escribas un `if` en el use case: sube esa lógica a la entidad.
+**Regla práctica en GEMA**: las entidades nuevas empiezan con logica de negocio (rich entities) desde el primer día, con un método de fábrica `create()`, validación de invariantes en `__post_init__` y métodos de cambio como `change_theme()` — como `UserPreference` más arriba. En GEMA no hay entidades anémicas en producción. El `@dataclass` sin métodos solo sirve como boceto inicial mientras se define la estructura; antes del primer commit, la entidad debe tener sus invariantes protegidas. Cuando el use case necesite una validación nueva, no escribas un `if` en el use case: sube esa lógica a la entidad.
 </Callout>
 
 <Callout type="info">
@@ -417,7 +430,7 @@ class UpdatePreferenceRequest:
     tema: str | None = None
 ```
 
-[EXPLICACION CORRECTA DEL CODIGO]
+Los DTOs son `@dataclass(frozen=True)` inmutables. `PreferenceResponse` es la respuesta plana (sin anidamiento JSON:API) que viaja del Use Case al endpoint. `UpdatePreferenceRequest` es el DTO de entrada con `tema` como opcional (el PATCH puede actualizar solo algunos campos).
 
 <Callout type="info">
 **Clase pura de Python — concepto (otra vez, pero con DTOs):** `@dataclass(frozen=True)` es inmutable. No tiene métodos de framework. No serializa, no valida, no lanza excepciones automáticas. Solo transporta datos de un lado a otro. Viaja del endpoint al Use Case y del Use Case al endpoint.
@@ -471,7 +484,7 @@ class PreferenceRepositoryPort(Protocol):
         ...
 ```
 
-[EXPLICACION CORRECTA DEL CODIGO]
+`PreferenceRepositoryPort` declara los métodos que cualquier repositorio de preferencias debe implementar: `get_by_user()` para buscar por usuario+empresa, y `save()` para persistir (INSERT o UPDATE según exista). No incluye `get_by_id()` porque el repositorio concreto lo hereda de `SqlAlchemyRepository` gracias a `pk_column`.
 
 <Callout type="info">
 **Interface (Protocol) — concepto**
@@ -507,7 +520,7 @@ class UnitOfWorkPort(Protocol):
     preferences: PreferenceRepositoryPort
 ```
 
-[EXPLICACION CORRECTA DEL CODIGO]
+Agregar `preferences: PreferenceRepositoryPort` al `UnitOfWorkPort` permite que cualquier Use Case acceda al repositorio de preferencias a través de `self.uow.preferences`. El UnitOfWork es el punto único de acceso a todos los repositorios dentro de una transacción.
 
 <Callout type="info">
 **Nota sobre el UoW:** El UnitOfWork maneja el ciclo de vida de la transacción: `__aenter__` abre la sesión, `commit()` persiste los cambios y publica eventos, `__aexit__` solo libera la sesión (no hace auto-commit). Los use cases de escritura deben llamar a `commit()` explícitamente. Los de lectura usan `async with self.uow` solo para abrir una sesión de lectura.
@@ -553,7 +566,7 @@ class GetUserPreferencesUseCase:
             )
 ```
 
-[EXPLICACION CORRECTA DEL CODIGO]
+`GetUserPreferencesUseCase` es un caso de uso de solo lectura: recibe strings, los convierte a Value Objects, busca las preferencias y devuelve un DTO. Si no existen, lanza `PreferenceNotFoundError` que se mapea a 404. No necesita `commit()` porque no escribe.
 
 <Callout type="info">
 **Para lecturas simples**: se pasan `company_id_str` y `user_id_str` como parámetros directos. Para casos con cuerpo (PATCH), usamos un DTO de entrada. Convención: si hay más de 2 parámetros, usa DTO siempre.
@@ -568,8 +581,6 @@ from app.application.dtos.preferences_dtos import (
 )
 from app.application.ports.unit_of_work import UnitOfWorkPort
 from app.domain.entities import UserPreference
-from app.domain.enums import Theme
-from app.domain.exceptions import PreferenceThemeInvalidError
 from app.domain.value_objects import CompanyId, UserId
 
 
@@ -601,14 +612,7 @@ class UpdateUserPreferencesUseCase:
                 )
 
             if request.tema is not None:
-                try:
-                    pref.tema = Theme(request.tema)
-                except ValueError:
-                    temas_validos = ", ".join(t.value for t in Theme)
-                    raise PreferenceThemeInvalidError(
-                        f"El tema '{request.tema}' no es válido. "
-                        f"Valores permitidos: {temas_validos}."
-                    )
+                pref.change_theme(request.tema)
 
             await self.uow.preferences.save(pref)
             await self.uow.commit()
@@ -620,7 +624,7 @@ class UpdateUserPreferencesUseCase:
             )
 ```
 
-[EXPLICACION CORRECTA DEL CODIGO]
+`UpdateUserPreferencesUseCase` es un caso de uso de escritura con upsert: si no existen preferencias, las crea con valores por defecto (`UserPreference.create()`). Si existe y se pasa un `tema`, delega la validación a la entidad mediante `pref.change_theme(request.tema)`. Finalmente persiste con `save()` y confirma la transacción con `commit()`.
 
 <Callout type="info">
 El Use Case nunca devuelve la entidad directamente. Siempre devuelve un DTO. Si devolvés la entidad, el endpoint podría modificarla directamente, rompiendo el encapsulamiento. El Use Case es el orquestador: recibe un DTO plano o parámetros, llama al Puerto (que delega a Infrastructure), aplica reglas de dominio, y devuelve otro DTO plano. La cadena de delegación completa es: Presentation delega en Application, Application delega en Infrastructure a través del Puerto, pero Application mantiene el control de la orquestación.
@@ -638,7 +642,7 @@ __all__ = [
 ]
 ```
 
-[EXPLICACION CORRECTA DEL CODIGO]
+El `__init__.py` re-exporta los dos Use Cases para que el Composition Root pueda importarlos desde `app.application.use_cases.preferences` sin acoplarse a la estructura interna del paquete.
 
 ---
 
@@ -673,7 +677,7 @@ class UserPreferenceModel(TenantMixin, TimestampMixin, Base):
     tema: Mapped[str] = mapped_column(String(20), nullable=False, default="oscuro")
 ```
 
-[EXPLICACION CORRECTA DEL CODIGO]
+`UserPreferenceModel` es el modelo ORM que mapea a la tabla `preferencias_usuarios`. Hereda de `TenantMixin` (hereda `empresa_id`), `TimestampMixin` (hereda `created_at` y `updated_at`), y `Base`. La PK es `usuario_id` como ForeignKey a `usuarios.id`.
 
 <Callout type="info">
 Notá que **hereda de `TenantMixin`**, igual que todos los modelos multi-tenant del proyecto (`UserModel`, `AssetModel`, `LocationModel`, etc.). `TenantMixin` provee el campo `empresa_id` automáticamente, con su ForeignKey e índice. Por eso no lo declaramos en el cuerpo de la clase.
@@ -685,7 +689,7 @@ Re-exportar en `src/app/infrastructure/db/models/__init__.py`:
 from app.infrastructure.db.models.preferences import UserPreferenceModel
 ```
 
-[EXPLICACION CORRECTA DEL CODIGO]
+Re-exportar el modelo en el `__init__.py` del paquete de modelos para que Alembic lo detecte al generar migraciones automaticas y para que otros módulos puedan importarlo desde `app.infrastructure.db.models`.
 
 #### Repositorio concreto
 
@@ -710,6 +714,8 @@ class SqlAlchemyPreferenceRepository(
 ):
     """Implementación en SQLAlchemy para el puerto de Preferencias."""
 
+    pk_column = "usuario_id"
+
     def __init__(
         self, session: AsyncSession, pending_events: list[DomainEvent] | None = None
     ) -> None:
@@ -731,14 +737,7 @@ class SqlAlchemyPreferenceRepository(
             updated_at=model.updated_at,
         )
 
-    async def get_by_id(self, id: UserId) -> UserPreference | None:
-        """Sobrescribe get_by_id del base porque la PK no se llama 'id'."""
-        stmt = select(UserPreferenceModel).where(
-            UserPreferenceModel.usuario_id == id.value
-        )
-        result = await self.session.execute(stmt)
-        model = result.scalar_one_or_none()
-        return self._to_entity(model) if model else None
+    # get_by_id se hereda de SqlAlchemyRepository gracias a pk_column = "usuario_id"
 
     async def get_by_user(
         self, usuario_id: UserId, empresa_id: CompanyId
@@ -755,11 +754,11 @@ class SqlAlchemyPreferenceRepository(
         return self._to_entity(model)
 ```
 
-[EXPLICACION CORRECTA DEL CODIGO]
+`SqlAlchemyPreferenceRepository` implementa el puerto. Declara `pk_column = "usuario_id"` para que `get_by_id()` y `delete()` heredados de `SqlAlchemyRepository` usen la columna correcta como PK. `get_by_user()` es un método ad-hoc para buscar por usuario+empresa.
 
 El repositorio concreto implementa `PreferenceRepositoryPort` (el contrato). Hace dos cosas: traduce de modelo ORM a entidad de dominio (`_to_entity`) y de entidad a modelo ORM (`_to_model`). El Use Case nunca ve el modelo ORM. Solo ve la entidad. Infrastructure es el puente entre ambos mundos.
 
-También sobrescribe `get_by_id` porque `UserPreferenceModel` tiene `usuario_id` como PK, no `id`. El `SqlAlchemyRepository` base asume que la PK se llama `id`, así que hay que adaptarlo.
+No necesita sobrescribir `get_by_id` porque declara `pk_column = "usuario_id"` como atributo de clase. El `SqlAlchemyRepository` base ahora tiene `pk_column: str = "id"` como atributo parametrizable, y el repositorio solo cambia el valor para adaptarse a su PK no convencional.
 
 <Callout type="info">
 **Mapping ORM ↔ Entidad de dominio**
@@ -854,7 +853,7 @@ class UpdatePreferenceRequest(BaseModel):
     data: UpdatePreferenceResource
 ```
 
-[EXPLICACION CORRECTA DEL CODIGO]
+Los schemas JSON:API definen la estructura que el cliente HTTP recibe y envía. `PreferenceDocument` envuelve el recurso, `PreferenceResource` tiene `type`, `id` y `attributes`. `UpdatePreferenceRequest` es el schema de entrada para PATCH con la estructura JSON:API completa (`data.attributes.tema`).
 
 <Callout type="info">
 **Recordatorio:** los Schemas siempre tienen estructura JSON:API: `{ data: { type, id, attributes: {...} } }`. Los DTOs son planos: `{ campo1, campo2 }`. No los confundas. El Schema es la vista que el cliente HTTP tiene del recurso. El DTO es la vista que la Application tiene del mismo recurso. Son dos perspectivas distintas del mismo dato, y la traducción entre ambas es responsabilidad exclusiva del endpoint.
@@ -881,8 +880,9 @@ from app.composition.container import (
     get_update_preferences_use_case,
     provide_user_preferences_use_case,
 )
+from app.domain.enums import PermissionModule
 from app.presentation.api.v1.endpoints.dependencies import (
-    get_current_active_user,
+    require_permission,
 )
 from app.presentation.api.v1.schemas.preferences import (
     PreferenceAttributes,
@@ -901,7 +901,7 @@ router = APIRouter()
 )
 async def get_preferences(
     company_id: str,
-    current_user: UserResponse = Depends(get_current_active_user),
+    current_user: UserResponse = Depends(require_permission(PermissionModule.PREFERENCES, "view")),
     use_case: GetUserPreferencesUseCase = Depends(provide_user_preferences_use_case),
 ) -> PreferenceDocument:
     """Obtiene las preferencias del usuario autenticado."""
@@ -926,7 +926,7 @@ async def get_preferences(
 async def update_preferences(
     company_id: str,
     request: UpdatePreferenceRequest,
-    current_user: UserResponse = Depends(get_current_active_user),
+    current_user: UserResponse = Depends(require_permission(PermissionModule.PREFERENCES, "edit")),
     use_case: UpdateUserPreferencesUseCase = Depends(get_update_preferences_use_case),
 ) -> PreferenceDocument:
     """Actualiza las preferencias del usuario autenticado."""
@@ -945,12 +945,12 @@ async def update_preferences(
     )
 ```
 
-[EXPLICACION CORRECTA DEL CODIGO]
+El endpoint usa `require_permission(PermissionModule.PREFERENCES, "view"/"edit")` que unifica autenticación + validación de tenant + RBAC en una sola dependencia. Luego traduce el schema Pydantic a un DTO, llama al Use Case y construye la respuesta JSON:API.
 
 El endpoint recibe el request HTTP (qué), lo valida contra el usuario autenticado (quién) en el contexto de la empresa del path (dónde), en el momento de la llamada (cuándo), para obtener o modificar las preferencias visuales (por qué), y lo hace traduciendo el schema a DTO, llamando al Use Case, y devolviendo un documento JSON:API (cómo).
 
-<Callout type="warn">
-**Validación multi-tenant:** en este flujo no se compara el `company_id` del path contra `current_user.empresa_id` porque el recurso preferences es del usuario autenticado y el repositorio filtra por ambos (`usuario_id` + `empresa_id`). Si el usuario pasa un `company_id` de otra empresa, la query devuelve `None` y el Use Case lanza 404. Para recursos donde el usuario pueda actuar en nombre de otras empresas, validá explícitamente: `if company_id != current_user.empresa_id: raise ForbiddenError`. No hacerlo es una fuga multi-tenant.
+<Callout type="tip">
+**Validación multi-tenant unificada:** desde v7, `require_permission()` integra la validación de tenant. Compara automáticamente el `company_id` del path contra `current_user.empresa_id` antes del chequeo RBAC. Esto cierra la fuga multi-tenant (IDOR) en todos los endpoints que usan la dependencia. Para endpoints que solo necesitan validación de tenant sin RBAC (ej: listar roles o ubicaciones), existe `Depends(require_tenant_read)` como alternativa ligera.
 </Callout>
 
 #### Registrar el router
@@ -967,7 +967,7 @@ v1_router.include_router(
 )
 ```
 
-[EXPLICACION CORRECTA DEL CODIGO]
+Registrar el router de preferencias en el `v1_router` con el prefijo `/companies/{company_id}/me/preferences`. La ruta no tiene `{id}` porque preferences es un singleton por usuario.
 
 #### Mapear excepciones
 
@@ -993,7 +993,7 @@ _EXCEPTION_MAP: dict[type[DomainException], tuple[int, str]] = {
 }
 ```
 
-[EXPLICACION CORRECTA DEL CODIGO]
+`_EXCEPTION_MAP` asocia cada excepción de dominio con un código HTTP y un error code. `PreferenceNotFoundError` → 404, `PreferenceThemeInvalidError` → 422. Sin este registro, el cliente recibiria un 500 generico en vez del codigo HTTP correcto.
 
 ---
 
@@ -1030,7 +1030,7 @@ async def get_update_preferences_use_case(
     return UpdateUserPreferencesUseCase(uow)
 ```
 
-[EXPLICACION CORRECTA DEL CODIGO]
+Las fábricas del Composition Root cablean las dependencias. `provide_user_preferences_use_case` (lectura) y `get_update_preferences_use_case` (escritura) reciben el UoW via `Depends(get_uow)` y construyen el Use Case correspondiente. No hay lógica de negocio, solo instanciación.
 
 Exportar en `src/app/composition/container/__init__.py`:
 
@@ -1050,7 +1050,7 @@ __all__ = [
 ]
 ```
 
-[EXPLICACION CORRECTA DEL CODIGO]
+Re-exportar las fábricas en el `__init__.py` del paquete `container/` para que los endpoints puedan importarlas desde `app.composition.container` sin conocer la estructura interna del paquete.
 
 <Callout type="info">
 **Nota sobre la convención de nombres:** en GEMA, las fábricas de use cases de **lectura** (get por ID) siguen el prefijo `provide_*` (ej: `provide_user_preferences_use_case`). Las de **escritura** (create, update, delete) usan `get_*`. Esto permite distinguir visualmente el tipo de operación en los imports del endpoint.
@@ -1111,8 +1111,8 @@ Supongamos que un cliente llama a `PATCH /v1/companies/{cid}/me/preferences` par
 La request atraviesa 4 middlewares, en este orden (inverso al de registro):
 
 1. **RequestIdMiddleware** — genera un `X-Request-ID` para trazabilidad.
-2. **ContentTypeMiddleware** — valida que el `Content-Type` sea `application/vnd.api+json`. En PATCH aplica.
-3. **AcceptMiddleware** — verifica que el cliente acepte `application/vnd.api+json`. 406 si no.
+2. **ContentTypeMiddleware** — valida que el `Content-Type` sea `application/vnd.api+json` en toda petición con cuerpo (POST, PATCH).
+3. **AcceptMiddleware** — verifica que el cliente acepte `application/vnd.api+json`. 406 si no. Aplica a toda petición, no solo PATCH.
 4. **RateLimitMiddleware** — control de tasa por IP. 429 si excede.
 
 ### 2. Router FastAPI y validación del path
@@ -1125,10 +1125,12 @@ FastAPI parsea el JSON del body contra `UpdatePreferenceRequest`. Si falta un ca
 
 ### 4. Endpoint — valida token
 
-FastAPI ejecuta `Depends(get_current_active_user)`:
+FastAPI ejecuta `Depends(require_permission(PermissionModule.PREFERENCES, "view"/"edit"))`:
 - Extrae el Bearer token del header `Authorization`.
 - `GetCurrentUserUseCase` verifica firma JWT, expiración y blocklist en Redis.
-- Devuelve el usuario autenticado. Si el token es inválido, lanza `InvalidTokenError` (401).
+- Valida que `company_id` del path coincida con la empresa del token (tenant check).
+- Verifica que el usuario tenga el permiso `preferencias:view` o `preferencias:edit` (RBAC).
+- Devuelve el usuario autenticado. Si el token es inválido, lanza `InvalidTokenError` (401). Si el tenant no coincide, lanza `InsufficientPermissionsError` (403).
 
 ### 5. Composition Root resuelve dependencias
 
@@ -1238,33 +1240,25 @@ Si el usuario nunca configuró sus preferencias, la tabla no tiene registro. El 
 
 ---
 
+## Deuda técnica documentada
+
+- **Sin control de concurrencia**: PATCH no tiene optimistic locking (lost updates posibles en alta concurrencia).
+- **Composition Root acoplado a FastAPI**: Impide testear use cases sin FastAPI.
+- **Testing y Observabilidad**: descartados por directiva.
+
+---
+
 ## Checklist final para tu PR
 
-- [ ] ¿Creé la entidad `UserPreference` en `src/app/domain/entities/preferences.py`?
-- [ ] ¿Tiene método fábrica `create()` y validación `__post_init__`?
-- [ ] ¿Agregué el enum `Theme` en `src/app/domain/enums.py`?
-- [ ] ¿Creé excepciones (`PreferenceException`, `PreferenceNotFoundError`, `PreferenceThemeInvalidError`) en `src/app/domain/exceptions/preferences.py`?
-- [ ] ¿Usé `PreferenceException(DomainException)` como clase base del módulo?
-- [ ] ¿Registré cada excepción en `_EXCEPTION_MAP` en `exception_handlers/domain.py`?
-- [ ] ¿Exporté con `__all__` en `exceptions/__init__.py` y `entities/__init__.py`?
-- [ ] ¿Definí el Puerto (`PreferenceRepositoryPort`) en `src/app/application/ports/preference_repository.py`?
-- [ ] ¿Creé DTOs en `src/app/application/dtos/preferences_dtos.py`?
-- [ ] ¿Implementé los Use Cases (`GetUserPreferencesUseCase`, `UpdateUserPreferencesUseCase`) en `src/app/application/use_cases/preferences/`?
-- [ ] ¿Exporté los Use Cases en `__init__.py` del paquete?
-- [ ] ¿Agregué `preferences: PreferenceRepositoryPort` al `UnitOfWorkPort` en `application/ports/unit_of_work.py`?
-- [ ] ¿Creé el modelo ORM (`UserPreferenceModel`) en `src/app/infrastructure/db/models/preferences.py`?
-- [ ] ¿Usé `TenantMixin` como el resto de modelos multi-tenant?
-- [ ] ¿Creé el repositorio concreto en `src/app/infrastructure/repositories/preference_repository.py`?
-- [ ] ¿Sobrescribí `get_by_id` porque la PK se llama `usuario_id`, no `id`?
-- [ ] ¿Incluí `created_at` y `updated_at` en `_to_model`?
-- [ ] ¿Registré el repositorio en `src/app/infrastructure/uow.py` (`SqlAlchemyUnitOfWork.__aenter__`)?
-- [ ] ¿Creé la migración Alembic y la apliqué?
-- [ ] ¿Creé los schemas JSON:API en `src/app/presentation/api/v1/schemas/preferences.py`?
-- [ ] ¿Incluí `id` en `UpdatePreferenceResource` (requisito JSON:API)?
-- [ ] ¿Creé el endpoint en `src/app/presentation/api/v1/endpoints/preferences.py`?
-- [ ] ¿Registré el router en `src/app/presentation/api/v1/router.py`?
-- [ ] ¿Usé `Depends(get_current_active_user)` en vez de `require_permission` para datos propios del usuario?
-- [ ] ¿Creé las fábricas en `src/app/composition/container/preferences.py`?
-- [ ] ¿Usé el prefijo `provide_*` para el use case de lectura y `get_*` para el de escritura?
-- [ ] ¿Exporté las fábricas en `src/app/composition/container/__init__.py`?
-- [ ] ¿Corrió `ruff check .` y `mypy src/app` sin errores?
+- [ ] 1. Entidad de dominio: métodos de cambio (no mutación directa en use case)
+- [ ] 2. Puerto (Protocol) definido y registrado en UnitOfWorkPort
+- [ ] 3. DTOs inmutables (frozen=True) para request/response
+- [ ] 4. Use case delega validación de reglas de negocio a la entidad
+- [ ] 5. Modelo ORM: hereda de TenantMixin y TimestampMixin
+- [ ] 6. Repositorio: `_to_model()` NO mapea timestamps; `_to_entity()` SÍ los mapea
+- [ ] 7. Excepciones registradas en `_EXCEPTION_MAP`
+- [ ] 8. Fábricas registradas en composition/container/ y re-exportadas en `__init__`
+- [ ] 9. Router registrado en v1/router.py
+- [ ] 10. Validación multi-tenant: `require_permission()` o `require_tenant_read()` presente
+- [ ] 11. RBAC: `require_permission()` presente y módulo registrado en `PermissionModule` (valor español)
+- [ ] 12. mypy strict: sin `# type: ignore`
