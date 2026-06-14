@@ -50,10 +50,10 @@ Las únicas responsabilidades de un endpoint en GEMA:
 
 Para toda esta guía vamos a usar el recurso **preferences** (tabla `preferencias_usuarios`). Son las preferencias o configuraciones de un usuario dentro de una empresa: el tema oscuro o claro, y en el futuro más ajustes de interfaz. Cada usuario tiene exactamente un registro. Esto lo hace más interesante que un CRUD genérico por varias razones:
 
-- Es una relación **1:1 con el usuario** — no tiene ID propio, usa `usuario_id` como PK.
+- Es una relación **1:1 con el usuario**  no tiene ID propio, usa `usuario_id` como PK.
 - Solo tiene **GET** (leer) y **PATCH** (actualizar). No hay POST ni DELETE.
 - El endpoint usa **RBAC completo** con `require_permission(PermissionModule.PREFERENCES, "view"/"edit")`, igual que el resto de módulos del sistema.
-- El endpoint es un **singleton** — no recibe `{id}` en la ruta.
+- El endpoint es un **singleton**  no recibe `{id}` en la ruta.
 
 ### Schema de la tabla
 
@@ -199,16 +199,16 @@ Siempre se empieza por esta capa. El dominio no depende de nada externo. No hay 
 
 <Files>
   <Folder name="src/app/domain" defaultOpen>
-    <File name="__init__.py" icon="python" />
-    <File name="enums.py" icon="python" />
-    <File name="events.py" icon="python" />
+    <File name="__init__.py" />
+    <File name="enums.py" />
+    <File name="events.py" />
     <Folder name="entities" defaultOpen>
-      <File name="__init__.py" icon="python" />
-      <File name="preference.py" icon="python" />
+      <File name="__init__.py" />
+      <File name="preference.py" />
     </Folder>
     <Folder name="exceptions" defaultOpen>
-      <File name="__init__.py" icon="python" />
-      <File name="preference.py" icon="python" />
+      <File name="__init__.py" />
+      <File name="preference.py" />
     </Folder>
     <Folder name="value_objects" />
   </Folder>
@@ -273,7 +273,6 @@ El `__init__.py` re-exporta las excepciones del módulo para que los use cases p
 
 Los enums evitan strings mágicos. Si en el código aparecen `"oscuro"` y `"claro"` como literales repartidos por 5 archivos, un typo (`"oscuro "` con espacio) puede pasar desapercibido hasta producción. Con un enum, el compilador (mypy) y el runtime protegen contra valores inválidos.
 
-<Callout type="info">
 **Enum de dominio**
 
 | Pregunta | Respuesta |
@@ -281,10 +280,9 @@ Los enums evitan strings mágicos. Si en el código aparecen `"oscuro"` y `"clar
 | **What** (¿Qué es?) | Una clase que hereda de `StrEnum` (Python 3.11+) y define un conjunto fijo de valores válidos. Cada miembro es un string, pero solo los definidos en la clase son válidos. |
 | **Why** (¿Por qué usarlo?) | Centraliza los valores permitidos en un solo lugar, elimina strings mágicos, da autocompletado en el IDE, y mypy detecta si pasás un string cualquiera donde se espera un `Theme`. |
 | **Who** (¿Quién lo define?) | La capa de **Domain**. No depende de nada externo. Solo usa `from enum import StrEnum` (stdlib). |
-| **Where** (¿Dónde vive?) | En `src/app/domain/enums.py`, un archivo compartido por todo el dominio. No se crea un archivo por módulo — todos los enums del dominio van en el mismo archivo. |
+| **Where** (¿Dónde vive?) | En `src/app/domain/enums.py`, un archivo compartido por todo el dominio. No se crea un archivo por módulo  todos los enums del dominio van en el mismo archivo. |
 | **When** (¿Cuándo crearlo?) | Cuando un campo de la entidad tiene un conjunto acotado de valores posibles: estados (`Active`, `Inactive`), tipos (`Admin`, `User`), categorías (`Asset`, `Location`), temas (`Dark`, `Light`). |
 | **How** (¿Cómo se crea?) | `class Theme(StrEnum):` con atributos de clase en MAYÚSCULAS como convención. El valor es el string que se persiste en BD y viaja en la API. |
-</Callout>
 
 Para el campo `tema` de `UserPreference`, los valores son `"oscuro"`, `"claro"` y `"sistema"`:
 
@@ -422,7 +420,6 @@ from app.domain.entities.preference import UserPreference
 
 <Callout type="info">
 **Clase pura de Python, qué significa exactamente:** Una "clase pura de Python" usa exclusivamente la biblioteca estándar (`dataclasses`, `datetime`, `uuid`, `enum`, `typing`). No importa nada de terceros:
-</Callout>
 
 | ✅ Permitido (stdlib) | ❌ Prohibido (externo) |
 |---|---|
@@ -430,6 +427,7 @@ from app.domain.entities.preference import UserPreference
 | `from datetime import datetime` | `from sqlalchemy import Column` |
 | `from enum import StrEnum` | `from fastapi import Query` |
 | `import uuid` | `from structlog import get_logger` |
+</Callout>
 
 <Callout type="info">
 Esta clase no sabe si los datos vienen de PostgreSQL, de un archivo CSV o de una API. Solo sabe que sus campos tienen ciertos tipos y que sus métodos validan reglas del negocio. Es el contrato más puro del sistema.
@@ -439,21 +437,19 @@ Esta clase no sabe si los datos vienen de PostgreSQL, de un archivo CSV o de una
 **Regla de oro**: Para mantener la lógica de negocio pura y desacoplada en la capa de Dominio, los desarrolladores deben evitar importar cualquier librería de terceros durante el modelado de entidades y reglas de negocio, asegurando así que el núcleo del sistema sea inmune a cambios tecnológicos, obsolescencias o migraciones de frameworks; esto se valida de forma práctica verificando que ningún módulo importado en el Dominio figure como dependencia externa en el archivo pyproject.toml.
 </Callout>
 
-<Callout type="info">
 **Entidad anémica vs Entidad rica**
-</Callout>
 
 | Dimensión | Entidad anémica | Entidad rica |
 |-----------|----------------|--------------|
 | **What** (qué) | Solo datos. Un `@dataclass` con campos y cero métodos de negocio. | Datos + reglas de negocio + eventos + métodos fábrica. |
 | **Why** (por qué) | El concepto no tiene reglas complejas. Solo almacena y expone valores. | El concepto tiene invariantes que proteger, decisiones que registrar o eventos que emitir. |
 | **Who** (quién) | Cualquier caso de uso puede leer/escribir campos directamente. | Solo los métodos públicos de la entidad modifican su estado. Nadie la "setea". |
-| **When** (cuándo) | Settings de usuario, metadatos simples, flags sin lógica asociada. | Usuario, Rol, Compañía, Órdenes de Trabajo — cualquier cosa con lógica de negocio. |
-| **Where** (dónde) | `domain/entities/` — mismo lugar que las ricas. | `domain/entities/` — mismo lugar que las anémicas. |
+| **When** (cuándo) | Settings de usuario, metadatos simples, flags sin lógica asociada. | Usuario, Rol, Compañía, Órdenes de Trabajo  cualquier cosa con lógica de negocio. |
+| **Where** (dónde) | `domain/entities/`  mismo lugar que las ricas. | `domain/entities/`  mismo lugar que las anémicas. |
 | **How** (cómo) | `@dataclass` plano. Los casos de uso leen y asignan valores directamente. | Clase con `@classmethod` fábrica, métodos como `activate()`, `has_permission()`, `pull_events()`. La entidad controla su propio estado. |
 
 <Callout type="info">
-**Regla práctica en GEMA**: las entidades nuevas empiezan con logica de negocio (rich entities) desde el primer día, con un método de fábrica `create()`, validación de invariantes en `__post_init__` y métodos de cambio como `change_theme()` — como `UserPreference` más arriba. En GEMA no hay entidades anémicas en producción. El `@dataclass` sin métodos solo sirve como boceto inicial mientras se define la estructura; antes del primer commit, la entidad debe tener sus invariantes protegidas. Cuando el use case necesite una validación nueva, no escribas un `if` en el use case: sube esa lógica a la entidad.
+**Regla práctica en GEMA**: las entidades nuevas empiezan con logica de negocio (rich entities) desde el primer día, con un método de fábrica `create()`, validación de invariantes en `__post_init__` y métodos de cambio como `change_theme()`  como `UserPreference` más arriba. En GEMA no hay entidades anémicas en producción. El `@dataclass` sin métodos solo sirve como boceto inicial mientras se define la estructura; antes del primer commit, la entidad debe tener sus invariantes protegidas. Cuando el use case necesite una validación nueva, no escribas un `if` en el use case: sube esa lógica a la entidad.
 </Callout>
 
 <Callout type="info">
@@ -463,7 +459,7 @@ Una invariante es una regla de negocio inmutable que siempre debe cumplirse para
 <Callout type="tip">
 **Ejemplo de commit para esta capa:**
 ```bash
-git commit -m "feat(backend): agregar entidad y excepciones de preferencias"
+git commit -m "feat(backend): agregar entidad [nombre_entidad] y excepciones [nombre_excepciones]"
 ```
 </Callout>
 
@@ -478,17 +474,17 @@ En esta capa se define el contrato (DTOs + Puerto) y la orquestación (Use Cases
 <Files>
   <Folder name="src/app/application" defaultOpen>
     <Folder name="dtos" defaultOpen>
-      <File name="preference_dtos.py" icon="python" />
+      <File name="preference_dtos.py" />
     </Folder>
     <Folder name="ports" defaultOpen>
-      <File name="preference_repository.py" icon="python" />
-      <File name="unit_of_work.py" icon="python" />
+      <File name="preference_repository.py" />
+      <File name="unit_of_work.py" />
     </Folder>
     <Folder name="use_cases" defaultOpen>
       <Folder name="preference" defaultOpen>
-        <File name="__init__.py" icon="python" />
-        <File name="get_user_preference.py" icon="python" />
-        <File name="update_user_preference.py" icon="python" />
+        <File name="__init__.py" />
+        <File name="get_user_preference.py" />
+        <File name="update_user_preference.py" />
       </Folder>
     </Folder>
   </Folder>
@@ -527,11 +523,11 @@ class UpdatePreferenceRequest:
 Los DTOs son `@dataclass(frozen=True)` inmutables. `PreferenceResponse` es la respuesta plana (sin anidamiento JSON:API) que viaja del Use Case al endpoint. `UpdatePreferenceRequest` es el DTO de entrada con `tema` como opcional (el PATCH puede actualizar solo algunos campos).
 
 <Callout type="info">
-**Clase pura de Python — concepto (otra vez, pero con DTOs):** `@dataclass(frozen=True)` es inmutable. No tiene métodos de framework. No serializa, no valida, no lanza excepciones automáticas. Solo transporta datos de un lado a otro. Viaja del endpoint al Use Case y del Use Case al endpoint.
+**Clase pura de Python  concepto (otra vez, pero con DTOs):** `@dataclass(frozen=True)` es inmutable. No tiene métodos de framework. No serializa, no valida, no lanza excepciones automáticas. Solo transporta datos de un lado a otro. Viaja del endpoint al Use Case y del Use Case al endpoint.
 </Callout>
 
 <Callout type="info">
-El DTO es la moneda que circula entre Presentation y Application. La entidad de dominio es la moneda que circula entre Application e Infrastructure (a través del Puerto). Son dos monedas distintas, para dos tramos distintos del viaje. Si mezclas los tramos —si el Use Case devuelve un modelo ORM o recibe un schema Pydantic— rompes el aislamiento de capas.
+El DTO es la moneda que circula entre Presentation y Application. La entidad de dominio es la moneda que circula entre Application e Infrastructure (a través del Puerto). Son dos monedas distintas, para dos tramos distintos del viaje. Si mezclas los tramos si el Use Case devuelve un modelo ORM o recibe un schema Pydantic rompes el aislamiento de capas.
 </Callout>
 
 ```mermaid
@@ -580,8 +576,7 @@ class PreferenceRepositoryPort(Protocol):
 
 `PreferenceRepositoryPort` declara los métodos que cualquier repositorio de preferencias debe implementar: `get_by_user()` para buscar por usuario+empresa, y `save()` para persistir (INSERT o UPDATE según exista). No incluye `get_by_id()` porque el repositorio concreto lo hereda de `SqlAlchemyRepository` gracias a `pk_column`.
 
-<Callout type="info">
-**Interface (Protocol) — concepto**
+**Interface (Protocol) concepto**
 
 | Pregunta | Respuesta |
 |----------|-----------|
@@ -591,7 +586,6 @@ class PreferenceRepositoryPort(Protocol):
 | **Where** (¿Dónde vive?) | Los Protocols están en `src/app/application/ports/`. Las implementaciones en `src/app/infrastructure/repositories/`. |
 | **When** (¿Cuándo se crea?) | Cuando un Use Case necesita delegar una operación a Infrastructure (persistencia, hashing, envío de emails, etc.). Se diseña el Puerto **antes** de escribir la implementación concreta. |
 | **How** (¿Cómo se escribe?) | `class MiPuerto(Protocol):` con métodos async, firmas tipadas y `...` en el cuerpo. El Use Case lo recibe en su `__init__`. Infrastructure implementa una clase con los mismos métodos. |
-</Callout>
 
 <Callout type="info">
 **Diferencia clave con ABC:** `Protocol` usa **tipado estructural** (no necesitas heredar explícitamente). ABC usa **tipado nominal** (debes escribir `class X(AbstractBase)`). Protocol es más flexible: cualquier clase con los métodos correctos es válida, aunque no haya declarado `implements MiProtocol`.
@@ -744,7 +738,7 @@ El `__init__.py` re-exporta los dos Use Cases para que el Composition Root pueda
 <Callout type="tip">
 **Ejemplo de commit para esta capa:**
 ```bash
-git commit -m "feat(backend): crear casos de uso y dtos para preferencias"
+git commit -m "feat(backend): crear casos de uso y dtos para [nombre_modulo]"
 ```
 </Callout>
 
@@ -760,15 +754,15 @@ En esta capa se materializa el puerto contra SQLAlchemy. Si el Puerto es el cont
   <Folder name="src/app/infrastructure" defaultOpen>
     <Folder name="db" defaultOpen>
       <Folder name="models" defaultOpen>
-        <File name="__init__.py" icon="python" />
-        <File name="preference.py" icon="python" />
+        <File name="__init__.py" />
+        <File name="preference.py" />
       </Folder>
     </Folder>
     <Folder name="repositories" defaultOpen>
-      <File name="__init__.py" icon="python" />
-      <File name="preference_repository.py" icon="python" />
+      <File name="__init__.py" />
+      <File name="preference_repository.py" />
     </Folder>
-    <File name="uow.py" icon="python" />
+    <File name="uow.py" />
   </Folder>
 </Files>
 
@@ -882,7 +876,6 @@ El repositorio concreto implementa `PreferenceRepositoryPort` (el contrato). Hac
 
 No necesita sobrescribir `get_by_id` porque declara `pk_column = "usuario_id"` como atributo de clase. El `SqlAlchemyRepository` base ahora tiene `pk_column: str = "id"` como atributo parametrizable, y el repositorio solo cambia el valor para adaptarse a su PK no convencional.
 
-<Callout type="info">
 **Mapping ORM ↔ Entidad de dominio**
 
 | Pregunta | Respuesta |
@@ -893,7 +886,6 @@ No necesita sobrescribir `get_by_id` porque declara `pk_column = "usuario_id"` c
 | **When** (¿Cuándo se ejecuta?) | En tiempo de request, durante cada operación de persistencia: escritura (`_to_model`: entity → model) cuando el Use Case llama a `save()`, y lectura (`_to_entity`: model → entity) cuando ejecuta `get_by_user()`. |
 | **Where** (¿Dónde vive?) | En los métodos `_to_model()` and `_to_entity()` de cada repositorio concreto, dentro de `src/app/infrastructure/repositories/`. |
 | **How** (¿Cómo se hace?) | Mediante mapeo explícito, campo por campo, sin atajos ni conversión automática. `_to_entity` toma un modelo y construye una entidad con sus Value Objects (`UserId`, `CompanyId`, `Theme`). `_to_model` hace el camino inverso. Nunca hay "magia". Esto hace que el código sea rastreable, testeable y fácil de modificar cuando cambia la base de datos o el dominio. |
-</Callout>
 
 #### Registrar en el UnitOfWork
 
@@ -928,7 +920,7 @@ poetry run alembic upgrade head
 <Callout type="tip">
 **Ejemplo de commit para esta capa:**
 ```bash
-git commit -m "feat(backend): implementar modelo orm y repositorio de preferencias"
+git commit -m "feat(backend): implementar modelo orm y repositorio de [nombre_modulo]"
 ```
 </Callout>
 
@@ -943,16 +935,16 @@ En esta capa se traduce HTTP/JSON:API a DTOs y viceversa. Nunca se llama a un re
     <Folder name="api" defaultOpen>
       <Folder name="v1" defaultOpen>
         <Folder name="endpoints" defaultOpen>
-          <File name="preferences.py" icon="python" />
+          <File name="preferences.py" />
         </Folder>
         <Folder name="schemas" defaultOpen>
-          <File name="preferences.py" icon="python" />
+          <File name="preferences.py" />
         </Folder>
-        <File name="router.py" icon="python" />
+        <File name="router.py" />
       </Folder>
     </Folder>
     <Folder name="exception_handlers" defaultOpen>
-      <File name="domain.py" icon="python" />
+      <File name="domain.py" />
     </Folder>
   </Folder>
 </Files>
@@ -1160,7 +1152,7 @@ _EXCEPTION_MAP: dict[type[DomainException], tuple[int, str]] = {
 <Callout type="tip">
 **Ejemplo de commit para esta capa:**
 ```bash
-git commit -m "feat(backend): agregar endpoint de FastAPI y schemas jsonapi"
+git commit -m "feat(backend): agregar endpoint de FastAPI y schemas jsonapi de [nombre_modulo]"
 ```
 </Callout>
 
@@ -1174,8 +1166,8 @@ Es el Composition Root: solo cablea dependencias. No hay lógica de negocio en e
 
 <Files>
   <Folder name="src/app/composition/container" defaultOpen>
-    <File name="__init__.py" icon="python" />
-    <File name="preference.py" icon="python" />
+    <File name="__init__.py" />
+    <File name="preference.py" />
   </Folder>
 </Files>
 
@@ -1234,7 +1226,6 @@ Re-exportar las fábricas en el `__init__.py` del paquete `container/` para que 
 **Nota sobre la convención de nombres:** en GEMA, todas las fábricas de use cases siguen el prefijo `get_*` (ej: `get_user_preference_use_case`, `get_update_preference_use_case`). Esto simplifica y unifica la denominación de los inyectables importados en los endpoints.
 </Callout>
 
-<Callout type="info">
 **Composition Root**
 
 | Pregunta | Respuesta |
@@ -1245,10 +1236,7 @@ Re-exportar las fábricas en el `__init__.py` del paquete `container/` para que 
 | **When** (¿Cuándo se ejecuta?) | En tiempo de request, no al arrancar la aplicación. FastAPI ejecuta la fábrica cada vez que un endpoint declara `Depends(nombre_de_la_fabrica)`. La primera vez que se necesita una dependencia, se ejecuta su fábrica. FastAPI cachea el resultado dentro del mismo request. |
 | **Where** (¿Dónde vive?) | En `src/app/composition/container/`, organizado en un archivo por módulo de dominio: `common.py` (fábricas compartidas), `auth.py`, `company.py`, `role.py`, `asset.py`, `location.py`, `preference.py`. |
 | **How** (¿Cómo funciona?) | Cada fábrica declara sus dependencias como parámetros con `Depends()`, declara el tipo de retorno como el Use Case concreto, y en el cuerpo solo instancia el Use Case con los parámetros recibidos. No hay `if`, `for`, `try/except` ni lógica de negocio en el cuerpo. |
-</Callout>
 
-
-<Callout type="info">
 El cableado completo para este módulo es:
 
 ```
@@ -1268,16 +1256,15 @@ sequenceDiagram
     CR->>CR: Instancia Use Case con uow
     CR-->>E: Retorna GetUserPreferencesUseCase
 ```
-</Callout>
 
 <Callout type="info">
-**¿Qué NO va en Composition?** Nada de lógica de negocio, nada de enrutado, nada de instanciación de dependencias fuera de las fábricas. Si ves un `if` o un `for` en una fábrica de Composition, está en el lugar equivocado. Tampoco se instancian repositorios fuera del UoW — el Use Case nunca hace `SqlAlchemyPreferenceRepository(session)`.
+**¿Qué NO va en Composition?** Nada de lógica de negocio, nada de enrutado, nada de instanciación de dependencias fuera de las fábricas. Si ves un `if` o un `for` en una fábrica de Composition, está en el lugar equivocado. Tampoco se instancian repositorios fuera del UoW el Use Case nunca hace `SqlAlchemyPreferenceRepository(session)`.
 </Callout>
 
 <Callout type="tip">
 **Ejemplo de commit para esta capa:**
 ```bash
-git commit -m "feat(backend): registrar fabricas de dependencias y configurar router"
+git commit -m "feat(backend): registrar fabricas de dependencias y configurar router para [nombre_modulo]"
 ```
 </Callout>
 
@@ -1295,10 +1282,10 @@ Supongamos que un cliente llama a `PATCH /v1/empresas/{empresa_id}/yo/preferenci
 
 La request atraviesa 4 middlewares, en este orden (inverso al de registro):
 
-1. **RequestIdMiddleware** — genera un `X-Request-ID` para trazabilidad.
-2. **ContentTypeMiddleware** — valida que el `Content-Type` sea `application/vnd.api+json` en toda petición con cuerpo (POST, PATCH).
-3. **AcceptMiddleware** — verifica que el cliente acepte `application/vnd.api+json`. 406 si no. Aplica a toda petición, no solo PATCH.
-4. **RateLimitMiddleware** — control de tasa por IP. 429 si excede.
+1. **RequestIdMiddleware**  genera un `X-Request-ID` para trazabilidad.
+2. **ContentTypeMiddleware**  valida que el `Content-Type` sea `application/vnd.api+json` en toda petición con cuerpo (POST, PATCH).
+3. **AcceptMiddleware**  verifica que el cliente acepte `application/vnd.api+json`. 406 si no. Aplica a toda petición, no solo PATCH.
+4. **RateLimitMiddleware**  control de tasa por IP. 429 si excede.
 
 ### 2. Router FastAPI y validación del path
 
@@ -1308,7 +1295,7 @@ El `v1_router` matchea la ruta `/v1/empresas/{empresa_id}/yo/preferencias` contr
 
 FastAPI parsea el JSON del body contra `UpdatePreferenceRequest`. Si falta un campo requerido o el tipo es incorrecto, lanza `RequestValidationError` (422) sin ejecutar el endpoint. El `validation_exception_handler` en `exception_handlers/validation.py` lo captura y devuelve errores JSON:API con `source.pointer` apuntando al campo inválido.
 
-### 4. Endpoint — valida token
+### 4. Endpoint  valida token
 
 FastAPI ejecuta `Depends(require_permission(PermissionModule.PREFERENCES, "view"/"edit"))`:
 - Extrae el Bearer token del header `Authorization`.
@@ -1323,7 +1310,7 @@ FastAPI ejecuta `Depends(get_user_preference_use_case)` (o `get_update_preferenc
 
 `get_uow` viene de `common.py` y construye `SqlAlchemyUnitOfWork`. Dentro del UoW, `__aenter__` registra `SqlAlchemyPreferenceRepository` en `self.preferences`.
 
-### 6. Use Case — orquesta la lógica
+### 6. Use Case  orquesta la lógica
 
 1. Convierte los strings a Value Objects: `CompanyId.from_string(empresa_id_str)` (pasado como `company_id_str` al caso de uso), `UserId.from_string(user_id_str)`.
 2. Abre transacción con `async with self.uow:`.
@@ -1390,12 +1377,14 @@ from app.application.dtos.preference_dtos import UpdatePreferenceRequest as Req
 request: Req  # Esto no tiene request.data.attributes
 ```
 
+<Callout type="info">
 | ¿Qué es? | DTO | Schema |
 |----------|-----|--------|
 | **Ubicación** | `application/dtos/` | `presentation/api/v1/schemas/` |
 | **Librería** | `@dataclass(frozen=True)` | Pydantic `BaseModel` |
 | **Estructura** | Plana: `tema: str` | JSON:API: `data.attributes.tema` |
 | **Viaja entre** | Endpoint ↔ Use Case | Cliente ↔ Endpoint |
+</Callout>
 
 El flujo completo: **Schema (request) → DTO → Use Case → DTO → Schema (response)**.
 
@@ -1421,7 +1410,7 @@ En el Use Case, convertí siempre los IDs string a Value Objects con `from_strin
 
 ### Asumir que las preferencias siempre existen
 
-Si el usuario nunca configuró sus preferencias, la tabla no tiene registro. El GET debe devolver **404** (como hicimos arriba). El PATCH hace **upsert**: si no existen, las crea con valores por defecto. Es una decisión de diseño — documentala en el docstring del Use Case, no en el endpoint.
+Si el usuario nunca configuró sus preferencias, la tabla no tiene registro. El GET debe devolver **404** (como hicimos arriba). El PATCH hace **upsert**: si no existen, las crea con valores por defecto. Es una decisión de diseño  documentala en el docstring del Use Case, no en el endpoint.
 
 ---
 
@@ -1431,7 +1420,7 @@ Si el usuario nunca configuró sus preferencias, la tabla no tiene registro. El 
 - [ ] 2. Puerto (Protocol) definido y registrado en UnitOfWorkPort
 - [ ] 3. DTOs inmutables (frozen=True) para request/response
 - [ ] 4. Use case delega validación de reglas de negocio a la entidad
-- [ ] 5. Modelo ORM: hereda de VersionMixin, TenantMixin y TimestampMixin (si usas `VersionMixin`, **la entidad DEBE tener un campo `version`** y el repositorio debe mapearlo — ver entidad `Asset` como referencia)
+- [ ] 5. Modelo ORM: hereda de VersionMixin, TenantMixin y TimestampMixin (si usas `VersionMixin`, **la entidad DEBE tener un campo `version`** y el repositorio debe mapearlo  ver entidad `Asset` como referencia)
 - [ ] 6. Repositorio: `_to_model()` NO mapea timestamps; `_to_entity()` SÍ los mapea
 - [ ] 7. Excepciones registradas en `_EXCEPTION_MAP`
 - [ ] 8. Fábricas registradas en composition/container/ y re-exportadas en `__init__`
